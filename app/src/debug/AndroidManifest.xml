@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only manifest overlay.
+
+  Local development talks to backend services on the host machine over plain
+  HTTP (10.0.2.2 from the emulator). Cleartext is enabled FOR DEBUG BUILDS
+  ONLY; the release manifest keeps the Android default (cleartext blocked).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic" />
+
+</manifest>
