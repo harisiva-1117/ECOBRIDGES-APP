@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Verified
@@ -149,6 +150,8 @@ fun CollectorDashboardScreen(
     val context = LocalContext.current
     val lots by viewModel.lots.collectAsState()
     val prices by viewModel.prices.collectAsState()
+    val referencePrices by viewModel.referencePrices.collectAsState()
+    val recyclerOffers by viewModel.recyclerOffers.collectAsState()
     val recyclers by viewModel.recyclers.collectAsState()
     val totalSettled by viewModel.totalSettledEarnings.collectAsState()
     val pendingDues by viewModel.pendingDues.collectAsState()
@@ -482,6 +485,7 @@ fun CollectorDashboardScreen(
                     Triple("Home", Icons.Default.Home, 0),
                     Triple("My Lots", Icons.Default.Inventory2, 1),
                     Triple("Recyclers", Icons.Default.LocationOn, 2),
+                    Triple("Prices", Icons.Default.Sell, 7),
                     Triple("Earnings", Icons.Default.CurrencyRupee, 5),
                     Triple("Profile", Icons.Default.Person, 6)
                 )
@@ -661,6 +665,14 @@ fun CollectorDashboardScreen(
                         capturedLotItems = emptyList()
                         showCreateDialog = true
                     }
+                )
+                7 -> CollectorPricesTab(
+                    referencePrices = referencePrices,
+                    offers = recyclerOffers,
+                    lots = lots,
+                    isSyncing = isSyncing,
+                    language = language,
+                    onRefresh = { viewModel.refreshFromCloud() }
                 )
             }
         }

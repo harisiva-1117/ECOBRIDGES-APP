@@ -7,6 +7,8 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/auth.security.test.js test/price.policy.test.js test/demo.auth.persistence.test.js",
+    "test:only": "node --test test/auth.security.test.js test/price.policy.test.js test/demo.auth.persistence.test.js",
     "format": "prettier --write \"src/**/*.ts\"",
     "start": "ts-node src/main.ts",
     "start:dev": "nodemon --watch src -e ts --exec ts-node src/main.ts",

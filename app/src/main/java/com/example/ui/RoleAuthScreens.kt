@@ -195,9 +195,9 @@ fun UnifiedRoleAuthScreen(
     }
 
     val statutorySubtitle = when (role) {
-        RoleType.INFORMAL_COLLECTOR -> "CPCB / MoEFCC Registered Aggregator Gateway"
-        RoleType.FORMAL_RECYCLER -> "Rule 13 Authorized Treatment & Recycling Facility"
-        RoleType.GOVERNMENT_ADMIN -> "MoEFCC EPR Regulatory & Statutory Oversight Portal"
+        RoleType.INFORMAL_COLLECTOR -> "Community e-waste collection gateway"
+        RoleType.FORMAL_RECYCLER -> "Recycler portal — authorization is verified by an administrator"
+        RoleType.GOVERNMENT_ADMIN -> "Administrator portal for verified staff accounts"
     }
 
     // Reusable OTP send action (button and voice both use it). Never stores or speaks the OTP.
@@ -221,26 +221,15 @@ fun UnifiedRoleAuthScreen(
                 isOtpRequested = true
                 otpCode = ""
                 if (authService.isDemoOtpMode()) {
-                    infoMessage = "Demo Mode — a random 6-digit Demo OTP was generated and is shown below. Signing you in automatically."
+                    infoMessage = "DEMO MODE — no SMS was sent. Enter the demo code shown below. This is not real identity verification."
                     voiceEngine?.speak(
-                        "Demo mode. Your O T P is displayed on screen. Signing you in automatically.",
+                        "Demo mode. Enter the demo code shown on screen. No S M S was sent.",
                         language
                     )
-                    // Auto sign-in: the demo code is already on screen. Wait 2s
-                    // so the user sees it arrive, then fill it in — the OTP
-                    // card watcher submits it automatically (smooth sign-in).
-                    // Skipped if the user already typed a complete code.
-                    coroutineScope.launch {
-                        delay(2000L)
-                        val liveCode = authService.devDisplayOtp.value
-                        if (isOtpRequested && liveCode?.length == 6 && otpCode.length != 6) {
-                            otpCode = liveCode
-                        }
-                    }
                 } else {
-                    infoMessage = "Verification code sent to +91 $phoneNumber via SMS."
+                    infoMessage = "Verification code requested. Enter the code to continue."
                     voiceEngine?.speak(
-                        "A verification code has been sent to your mobile by SMS. Please enter it to continue.",
+                        "A verification code was requested. Please enter it to continue.",
                         language
                     )
                 }
@@ -314,19 +303,6 @@ fun UnifiedRoleAuthScreen(
                         "Credentials accepted. Your verification code is displayed on screen. Please enter it to continue.",
                         language
                     )
-                    if (authService.isDemoOtpMode()) {
-                        // Auto sign-in: wait 2s so the code is seen arriving,
-                        // then fill it — the challenge card watcher submits it.
-                        coroutineScope.launch {
-                            delay(2000L)
-                            val liveCode = authService.devDisplayOtp.value
-                            if (authStage == AuthStage.OTP_CHALLENGE &&
-                                liveCode?.length == 6 && otpCode.length != 6
-                            ) {
-                                otpCode = liveCode
-                            }
-                        }
-                    }
                 } else if (!res.isSuccess) {
                     errorMessage = res.errorMessage ?: "Authentication failed."
                     voiceEngine?.speak(errorMessage ?: "", language)
@@ -377,23 +353,9 @@ fun UnifiedRoleAuthScreen(
                 otpCode = ""
                 resendCountdown = authService.getResendCooldownRemaining().toInt().coerceAtLeast(45)
                 infoMessage = if (authService.isDemoOtpMode()) {
-                    "A new Demo OTP was generated and is shown below. Signing you in automatically."
+                    "DEMO MODE — no SMS was sent. Enter the demo code shown below."
                 } else {
                     "A new verification code was sent."
-                }
-                if (authService.isDemoOtpMode()) {
-                    // Auto sign-in on the fresh demo code, same as first send:
-                    // wait 2s, fill, watcher submits.
-                    coroutineScope.launch {
-                        delay(2000L)
-                        val liveCode = authService.devDisplayOtp.value
-                        if (authStage == AuthStage.OTP_CHALLENGE &&
-                            liveCode?.length == 6 && otpCode.length != 6 &&
-                            !isVerifying
-                        ) {
-                            otpCode = liveCode
-                        }
-                    }
                 }
             }.onFailure { err ->
                 errorMessage = err.localizedMessage ?: "Failed to resend the code."
@@ -589,7 +551,12 @@ fun UnifiedRoleAuthScreen(
             }
             RoleType.FORMAL_RECYCLER -> {
                 val recyclerVm = remember {
-                    RecyclerViewModel(context.applicationContext as Application)
+                    RecyclerViewModel(
+                        application = context.applicationContext as Application,
+                        actorRecyclerId = user.facilityId.ifBlank { user.statutoryIdentifier },
+                        facilityName = user.entityName,
+                        isDemoAccount = user.isDemoAccount
+                    )
                 }
                 FormalRecyclerPortalScreen(
                     viewModel = recyclerVm,
@@ -604,7 +571,11 @@ fun UnifiedRoleAuthScreen(
             }
             RoleType.GOVERNMENT_ADMIN -> {
                 val adminVm = remember {
-                    AdminViewModel(context.applicationContext as Application)
+                    AdminViewModel(
+                        application = context.applicationContext as Application,
+                        adminActorId = user.statutoryIdentifier,
+                        isDemoAccount = user.isDemoAccount
+                    )
                 }
                 GovernmentAdminPortalScreen(
                     viewModel = adminVm,
@@ -865,6 +836,51 @@ fun UnifiedRoleAuthScreen(
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.weight(1f)
                         )
+                    }
+                }
+            }
+
+            // 3b. Clearly-labelled demo banner. This is deliberately visible
+            // even before the tester requests a code so the demo nature of the
+            // session can never be mistaken for real identity verification.
+            if (demoMode) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
+                    shape = RoundedCornerShape(14.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB300)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp)
+                        .testTag("demo_login_banner")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "DEMO LOGIN — NOT REAL IDENTITY VERIFICATION",
+                            color = Color(0xFF8D6E00),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "No SMS is sent. Demo OTP: ${authService.demoOtpCode()}",
+                            color = TextPrimaryDark,
+                            fontSize = 12.sp
+                        )
+                        if (authService.demoAccountHint().isNotBlank()) {
+                            Text(
+                                text = "Demo accounts: ${authService.demoAccountHint()}",
+                                color = TextSecondaryMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                        if (role == RoleType.GOVERNMENT_ADMIN && !authService.isDemoAdminEnabled()) {
+                            Text(
+                                text = "Admin demo is disabled in this build.",
+                                color = Color(0xFFC62828),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
@@ -1198,7 +1214,7 @@ private fun PhoneOtpAuthCard(
 
                     Text(
                         text = if (isDemoMode) {
-                            "Demo Mode — a random 6-digit Demo OTP will be generated and shown here. No SMS is sent."
+                            "Demo Mode - a configured 6-digit Demo OTP will be shown here. No SMS is sent."
                         } else {
                             "A 6-digit verification code will be sent to your mobile via SMS."
                         },

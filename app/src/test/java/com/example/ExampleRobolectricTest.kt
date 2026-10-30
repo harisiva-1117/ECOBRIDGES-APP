@@ -215,14 +215,31 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `user login generates dummy OTP and displayed OTP logs in successfully`() = kotlinx.coroutines.runBlocking {
+    fun `demo OTP opens only the permitted role and never admin`() = kotlinx.coroutines.runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("registered_user_roles", Context.MODE_PRIVATE)
+            .edit().clear().commit()
         val authService = com.example.auth.SupabaseAuthService.getInstance(context)
         authService.signOut()
 
-        // 1. Phone OTP login flow
+        // 1. An arbitrary number may use the non-admin demo portals only.
+        val collectorDemo = authService.generateAndSendOtp(
+            phoneNumber = "9000000001",
+            targetRole = RoleType.INFORMAL_COLLECTOR
+        )
+        assert(collectorDemo.isSuccess)
+        authService.signOut()
+
+        val adminDemo = authService.generateAndSendOtp(
+            phoneNumber = "9000000001",
+            targetRole = RoleType.GOVERNMENT_ADMIN
+        )
+        assert(!adminDemo.isSuccess)
+
+        // 2. The Demo OTP flow works for a locally registered collector.
+        authService.rememberLocalRegistration("9000000002", RoleType.INFORMAL_COLLECTOR)
         val otpRes = authService.generateAndSendOtp(
-            phoneNumber = "9876543210",
+            phoneNumber = "9000000002",
             targetRole = RoleType.INFORMAL_COLLECTOR
         )
         assert(otpRes.isSuccess)
@@ -230,17 +247,16 @@ class ExampleRobolectricTest {
         assertNotNull(devOtp)
         assertEquals(6, devOtp!!.length)
 
-        // Verifying wrong code fails
+        // A wrong code fails; the displayed Demo OTP succeeds.
         val wrong = authService.verifyOtpAndLogin(
-            phoneNumber = "9876543210",
+            phoneNumber = "9000000002",
             enteredOtp = "000000",
             targetRole = RoleType.INFORMAL_COLLECTOR
         )
         assert(!wrong.isSuccess)
 
-        // Verifying displayed OTP succeeds
         val success = authService.verifyOtpAndLogin(
-            phoneNumber = "9876543210",
+            phoneNumber = "9000000002",
             enteredOtp = devOtp,
             targetRole = RoleType.INFORMAL_COLLECTOR
         )
@@ -248,55 +264,41 @@ class ExampleRobolectricTest {
         assertNotNull(success.userProfile)
         assertEquals(RoleType.INFORMAL_COLLECTOR, success.userProfile?.role)
         assertEquals(com.example.auth.AccountStatus.ACTIVE, success.userProfile?.accountStatus)
+        // Demo identifiers must never look like a real CPCB registration.
+        assert(success.userProfile?.statutoryIdentifier?.startsWith("DEMO-") == true)
+
+        // 3. A configured recycler number cannot sign in to the collector portal.
+        authService.signOut()
+        val crossRole = authService.generateAndSendOtp(
+            phoneNumber = "9876543211",
+            targetRole = RoleType.INFORMAL_COLLECTOR
+        )
+        assert(!crossRole.isSuccess)
         authService.signOut()
     }
 
     @Test
-    fun `registered sign-in plus displayed OTP opens the correct dashboard`() = kotlinx.coroutines.runBlocking {
+    fun `unregistered email credentials never obtain a session or a dashboard`() = kotlinx.coroutines.runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val authService = com.example.auth.SupabaseAuthService.getInstance(context)
         authService.signOut()
 
-        // Step 1: registered credentials are accepted and park at the OTP step.
+        // Must fail whether the backend rejects the credentials or is
+        // unreachable: there is no local "accept anything" fallback any more.
         val pending = authService.loginWithEmail(
-            "collector@ecobridges.demo", "EcoBridge#2026", RoleType.INFORMAL_COLLECTOR
+            "nobody-9000000003@example.invalid", "NotARealPassword#1", RoleType.INFORMAL_COLLECTOR
         )
         assert(!pending.isSuccess)
-        assert(pending.awaitingOtp)
-        // No dashboard before the OTP is verified.
-        assert(authService.authenticatedUser.value == null)
-
-        // Step 2a: a wrong code fails and keeps the door closed.
-        val wrong = authService.verifyLoginOtp("000000", RoleType.INFORMAL_COLLECTOR)
-        assert(!wrong.isSuccess)
-        assert(authService.authenticatedUser.value == null)
-
-        // Step 2b: the displayed Demo OTP completes the login.
-        val code = authService.devDisplayOtp.value
-        assertNotNull(code)
-        assertEquals(6, code!!.length)
-        assert(code.all { it.isDigit() })
-        val success = authService.verifyLoginOtp(code, RoleType.INFORMAL_COLLECTOR)
-        assert(success.isSuccess)
-        assertNotNull(success.userProfile)
-        assertEquals(RoleType.INFORMAL_COLLECTOR, success.userProfile?.role)
-        assertEquals(com.example.auth.AccountStatus.ACTIVE, success.userProfile?.accountStatus)
-        assert(success.userProfile?.permissions?.contains("COLL_ISSUE_RECEIPT") == true)
-        assert(success.userProfile?.displayName?.isNotBlank() == true)
-
-        // Step 3: the same account cannot enter a different role's portal.
-        authService.signOut()
-        val pendingOther = authService.loginWithEmail(
-            "collector@ecobridges.demo", "EcoBridge#2026", RoleType.FORMAL_RECYCLER
-        )
-        assert(pendingOther.awaitingOtp)
-        val mismatch = authService.verifyLoginOtp(
-            authService.devDisplayOtp.value!!, RoleType.FORMAL_RECYCLER
-        )
-        assert(mismatch.isSuccess || mismatch.errorCode == com.example.auth.AuthErrorCode.ROLE_MISMATCH)
+        assert(!pending.awaitingOtp)
+        assertEquals(null, authService.authenticatedUser.value)
+        assertEquals(null, authService.devDisplayOtp.value)
         authService.signOut()
     }
 
+    @org.junit.Ignore(
+        "Integration test: requires the Supabase schema (0001-0007) to be applied, " +
+            "'Confirm email' disabled, and network access. Not run in unit-test CI."
+    )
     @Test
     fun `sign-up stores the user in Supabase and the new credentials pass the full flow`() = kotlinx.coroutines.runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()

@@ -16,6 +16,17 @@ logger = logging.getLogger("WhisperService")
 # Supported language codes
 SUPPORTED_LANGUAGES = ["hi", "mr", "en"]
 
+
+class TranscriptionUnavailableError(RuntimeError):
+    """Raised when the STT model is not loaded.
+
+    The service must never invent a transcript: a fabricated result would be
+    indistinguishable from real speech recognition and could drive real
+    business actions (lot creation, price queries) from audio that was never
+    understood.
+    """
+
+
 class WhisperSpeechService:
     def __init__(self):
         self.model_size = os.getenv("WHISPER_MODEL_SIZE", "base")
@@ -25,6 +36,10 @@ class WhisperSpeechService:
         self._initialize_model()
 
     def _initialize_model(self):
+        if os.getenv("WHISPER_DISABLE_MODEL", "").strip().lower() in ("1", "true", "yes"):
+            logger.warning("WHISPER_DISABLE_MODEL is set: running without an STT model.")
+            self.model = None
+            return
         try:
             from faster_whisper import WhisperModel
             logger.info(f"Loading faster-whisper model '{self.model_size}' on {self.device} ({self.compute_type})...")
@@ -36,7 +51,12 @@ class WhisperSpeechService:
             )
             logger.info("faster-whisper model loaded successfully.")
         except Exception as e:
-            logger.warning(f"Could not load faster-whisper locally: {e}. Falling back to dynamic mock transcriber.")
+            logger.error(
+                "Could not load faster-whisper locally (%s). The transcribe "
+                "endpoints will return 503 until a model is available; no "
+                "simulated transcript is produced.",
+                e,
+            )
             self.model = None
 
     def transcribe_audio(
@@ -56,40 +76,46 @@ class WhisperSpeechService:
                 "is_hinglish": False
             }
 
-        if self.model is not None:
-            try:
-                audio_stream = io.BytesIO(audio_bytes)
-                # Configure transcription with language detection
-                segments, info = self.model.transcribe(
-                    audio_stream,
-                    beam_size=5,
-                    language=preferred_language if preferred_language in SUPPORTED_LANGUAGES else None,
-                    task="transcribe",
-                    initial_prompt="ECOBRIDGES, CPCB, E-Waste, Recycler, Collector, Admin, Scrap, Metal, Rupees, Lot, किलोग्राम, दर, भाव, कचरा",
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
+        if self.model is None:
+            raise TranscriptionUnavailableError(
+                "Speech recognition model is not loaded. Set WHISPER_MODEL_SIZE "
+                "and ensure faster-whisper models are available; no simulated "
+                "transcript is produced."
+            )
 
-                text_segments = [segment.text.strip() for segment in segments]
-                full_transcript = " ".join(text_segments)
+        try:
+            audio_stream = io.BytesIO(audio_bytes)
+            # Configure transcription with language detection
+            segments, info = self.model.transcribe(
+                audio_stream,
+                beam_size=5,
+                language=preferred_language if preferred_language in SUPPORTED_LANGUAGES else None,
+                task="transcribe",
+                initial_prompt="ECOBRIDGES, CPCB, E-Waste, Recycler, Collector, Admin, Scrap, Metal, Rupees, Lot, किलोग्राम, दर, भाव, कचरा",
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=500)
+            )
 
-                detected_lang = info.language
-                prob = info.language_probability
+            text_segments = [segment.text.strip() for segment in segments]
+            full_transcript = " ".join(text_segments)
 
-                is_hinglish = self._detect_hinglish(full_transcript, detected_lang)
+            detected_lang = info.language
+            prob = info.language_probability
 
-                return {
-                    "text": full_transcript,
-                    "language": detected_lang,
-                    "confidence": float(prob),
-                    "is_hinglish": is_hinglish,
-                    "duration": info.duration
-                }
-            except Exception as e:
-                logger.error(f"Error during transcription: {e}")
+            is_hinglish = self._detect_hinglish(full_transcript, detected_lang)
 
-        # Resilient fallback transcription for simulated audio buffers
-        return self._generate_simulated_transcription(audio_bytes, preferred_language)
+            return {
+                "text": full_transcript,
+                "language": detected_lang,
+                "confidence": float(prob),
+                "is_hinglish": is_hinglish,
+                "duration": info.duration
+            }
+        except Exception as e:
+            logger.error(f"Error during transcription: {e}")
+            raise TranscriptionUnavailableError(
+                "Speech recognition failed for this audio file."
+            ) from e
 
     def _detect_hinglish(self, text: str, detected_lang: str) -> bool:
         """
@@ -103,18 +129,3 @@ class WhisperSpeechService:
         has_latin = any(c.isascii() and c.isalpha() for c in text)
         has_hinglish_keyword = any(marker in lower for marker in hinglish_markers)
         return has_latin and has_hinglish_keyword
-
-    def _generate_simulated_transcription(
-        self,
-        audio_bytes: bytes,
-        lang: Optional[str]
-    ) -> Dict[str, Any]:
-        """Provides high-accuracy simulated responses when running in environments without native audio hardware."""
-        selected_lang = lang or "en"
-        return {
-            "text": "Open informal collector login",
-            "language": selected_lang,
-            "confidence": 0.98,
-            "is_hinglish": False,
-            "duration": 1.5
-        }

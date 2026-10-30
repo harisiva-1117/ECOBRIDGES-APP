@@ -51,6 +51,14 @@ fun MainAppNavHost(
     val authService = remember { SupabaseAuthService.getInstance(context) }
     val authenticatedUser by authService.authenticatedUser.collectAsState()
 
+    // The voice backend verifies the caller's Supabase JWT; supply the current
+    // session token so authenticated requests are not rejected with 401.
+    LaunchedEffect(authService) {
+        com.example.network.BackendVoiceClient.configureAuthTokenProvider {
+            authService.authenticatedUser.value?.sessionToken
+        }
+    }
+
     // Sync active screen with centralized VoiceIntentRouter
     LaunchedEffect(currentDestination) {
         val screen = when (currentDestination) {

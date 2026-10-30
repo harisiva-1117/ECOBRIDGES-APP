@@ -1,6 +1,7 @@
 package com.example.ui.admin
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Factory
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -38,6 +40,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +56,7 @@ import com.example.i18n.PortalLabels
 import com.example.model.Language
 import com.example.model.MaterialLot
 import com.example.ui.theme.BackgroundCream
+import com.example.ui.theme.EcoMint
 import com.example.ui.theme.EmeraldAccent
 import com.example.ui.theme.ForestGreenDark
 import com.example.ui.theme.ForestGreenPrimary
@@ -77,6 +83,16 @@ fun GovernmentAdminPortalScreen(
     val unlinkedLots by viewModel.unlinkedLots.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
     val lastError by viewModel.lastError.collectAsState()
+
+    var showPriceManagement by remember { mutableStateOf(false) }
+    if (showPriceManagement) {
+        AdminPriceManagementScreen(
+            viewModel = viewModel,
+            language = language,
+            onBack = { showPriceManagement = false }
+        )
+        return
+    }
 
     // Keep the national registry current while an officer is viewing it. The
     // refresh icon remains available for an immediate on-demand update.
@@ -257,6 +273,57 @@ fun GovernmentAdminPortalScreen(
                                 ForestGreenPrimary
                             )
                         }
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MintBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showPriceManagement = true }
+                        .testTag("admin_price_management_entry")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(EcoMint),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Sell,
+                                contentDescription = null,
+                                tint = ForestGreenPrimary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Price management",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = TextPrimaryDark
+                            )
+                            Text(
+                                text = "Publish indicative reference prices, review history and sync",
+                                fontSize = 11.sp,
+                                color = TextSecondaryMuted
+                            )
+                        }
+                        Text(
+                            text = "Open",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ForestGreenPrimary
+                        )
                     }
                 }
             }

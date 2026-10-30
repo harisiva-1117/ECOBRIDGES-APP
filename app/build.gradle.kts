@@ -10,6 +10,41 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+/**
+ * Demo-login configuration.
+ *
+ * Values are read from the local (git-ignored) `.env` file when present, then
+ * fall back to the defaults below. They are compiled into BuildConfig, so a
+ * production build is demo-disabled unless BOTH `DEMO_LOGIN_ENABLED=true` and
+ * `DEMO_LOGIN_ALLOW_RELEASE=true` are set explicitly.
+ *
+ * These flags never grant backend access: a demo session has no Supabase JWT,
+ * so RLS/role checks still reject every protected operation.
+ */
+fun localEnvValue(key: String): String? {
+  val files = listOf(rootProject.file(".env"), rootProject.file("app/.env"))
+  for (file in files) {
+    if (!file.exists()) continue
+    val match = file.readLines().firstOrNull { line ->
+      val trimmed = line.trim()
+      trimmed.startsWith("$key=") && !trimmed.startsWith("#")
+    } ?: continue
+    val value = match.substringAfter("=").trim().removeSurrounding("\"")
+    if (value.isNotEmpty()) return value
+  }
+  return null
+}
+
+fun configString(key: String, default: String): String =
+  (localEnvValue(key) ?: default).replace("\"", "").replace("\\", "")
+
+fun configFlag(key: String, default: Boolean): Boolean =
+  when ((localEnvValue(key) ?: "").trim().lowercase()) {
+    "true", "1", "yes", "on" -> true
+    "false", "0", "no", "off" -> false
+    else -> default
+  }
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -23,15 +58,41 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     manifestPlaceholders["MAPS_API_KEY"] = "DEFAULT_MAPS_API_KEY"
+
+    // Clearly-labelled hackathon demo sign-in (no SMS is ever sent).
+    buildConfigField("String", "DEMO_OTP_CODE", "\"${configString("DEMO_OTP_CODE", "123456")}\"")
+    buildConfigField(
+      "String",
+      "DEMO_ACCOUNTS",
+      "\"${configString("DEMO_ACCOUNTS", "9876543210:collector,9876543211:recycler,9876543212:admin")}\""
+    )
   }
+
+  // Release signing is optional. When no keystore / passwords are supplied the
+  // release variant is built unsigned (installable only after the operator
+  // signs it). Never commit a keystore: *.jks / *.keystore are git-ignored.
+  val releaseKeystoreFile =
+    file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")
+  val releaseStorePassword = System.getenv("STORE_PASSWORD")
+  val releaseKeyPassword = System.getenv("KEY_PASSWORD")
+  val releaseSigningConfigured =
+    releaseKeystoreFile.exists() &&
+      !releaseStorePassword.isNullOrBlank() &&
+      !releaseKeyPassword.isNullOrBlank()
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      if (releaseSigningConfigured) {
+        storeFile = releaseKeystoreFile
+        storePassword = releaseStorePassword
+        keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+        keyPassword = releaseKeyPassword
+      } else {
+        logger.lifecycle(
+          "Release signing is not configured (missing keystore or STORE_PASSWORD/KEY_PASSWORD). " +
+            "Release artifacts will be unsigned."
+        )
+      }
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -46,9 +107,24 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      // Unsigned when no signing identity is available; never fail the build
+      // just because a keystore is absent.
+      signingConfig = if (releaseSigningConfigured) signingConfigs.getByName("release") else null
+
+      // Demo login is OFF in production unless the operator explicitly opts in
+      // with BOTH flags. A demo account can never perform privileged backend
+      // operations because it has no Supabase JWT.
+      buildConfigField("boolean", "DEMO_LOGIN_ENABLED", configFlag("DEMO_LOGIN_ENABLED", false).toString())
+      buildConfigField("boolean", "DEMO_LOGIN_ALLOW_RELEASE", configFlag("DEMO_LOGIN_ALLOW_RELEASE", false).toString())
+      buildConfigField("boolean", "DEMO_ENABLE_ADMIN", configFlag("DEMO_ENABLE_ADMIN", false).toString())
     }
-    debug { }
+    debug {
+      // Local hackathon builds are demo-enabled by default. This flag only
+      // controls the clearly-labelled on-device OTP flow.
+      buildConfigField("boolean", "DEMO_LOGIN_ENABLED", configFlag("DEMO_LOGIN_ENABLED", true).toString())
+      buildConfigField("boolean", "DEMO_LOGIN_ALLOW_RELEASE", "false")
+      buildConfigField("boolean", "DEMO_ENABLE_ADMIN", configFlag("DEMO_ENABLE_ADMIN", true).toString())
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -72,6 +148,20 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  // Never package backend AI provider credentials into the APK, even if they
+  // are accidentally added to the local .env again.
+  ignoreList.add("GROK_API_KEY")
+  ignoreList.add("XAI_API_KEY")
+  ignoreList.add("XAI_BASE_URL")
+  ignoreList.add("GROK_MODEL")
+  // Demo-login flags are consumed by `configFlag`/`configString` above and
+  // emitted with their real types. Ignore them here so the secrets plugin does
+  // not inject duplicate String BuildConfig fields from `.env`.
+  ignoreList.add("DEMO_LOGIN_ENABLED")
+  ignoreList.add("DEMO_LOGIN_ALLOW_RELEASE")
+  ignoreList.add("DEMO_OTP_CODE")
+  ignoreList.add("DEMO_ENABLE_ADMIN")
+  ignoreList.add("DEMO_ACCOUNTS")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }

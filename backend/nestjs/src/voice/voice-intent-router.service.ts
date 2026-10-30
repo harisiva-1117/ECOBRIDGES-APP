@@ -72,7 +72,12 @@ export class VoiceIntentRouterService {
           currentScreen: context.currentScreen,
           currentRole: userRole || context.currentRole,
         },
-        { timeout: 3500 }
+        {
+          timeout: 3500,
+          headers: process.env.VOICE_API_KEY
+            ? { 'X-API-Key': process.env.VOICE_API_KEY }
+            : undefined,
+        }
       );
       nlpResult = response.data;
     } catch (err: any) {

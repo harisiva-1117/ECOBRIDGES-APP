@@ -24,9 +24,17 @@ data class MaterialLotEntity(
     val recyclerConfirmed: Boolean,
     val eprCertificateNo: String?,
     val manifestDetails: String?,
-    val isSynced: Boolean
+    val isSynced: Boolean,
+    /** Snapshot of the price actually agreed at handover. Never overwritten. */
+    val agreedRatePerKg: Double? = null,
+    val agreedAt: Long? = null
 )
 
+/**
+ * Cached government/CPCB **indicative reference price**. Editable only by an
+ * authenticated ACTIVE government admin (enforced by RLS server-side and by
+ * [com.example.data.PriceManagementPolicy] on-device).
+ */
 @Entity(tableName = "price_records")
 data class PriceRecordEntity(
     @PrimaryKey val id: String,
@@ -40,7 +48,80 @@ data class PriceRecordEntity(
     val trendPercentage: Double,
     val unit: String,
     val dateUpdated: String,
-    val keyMetalsJoined: String
+    val keyMetalsJoined: String,
+    val grade: String = "",
+    val currency: String = "INR",
+    val isActive: Boolean = true,
+    val effectiveDate: String? = null,
+    val updatedAt: Long = 0L,
+    val updatedBy: String = "",
+    val version: Long = 1L
+)
+
+/**
+ * A recycler's purchase offer for one material. Deliberately separate from
+ * [PriceRecordEntity] (the government reference price). Only the owning
+ * recycler may write an offer; the server resolves that owner from the CPCB
+ * registry via `current_recycler_id()`.
+ */
+@Entity(tableName = "recycler_offers")
+data class RecyclerOfferEntity(
+    @PrimaryKey val offerId: String,
+    val recyclerId: String,
+    val recyclerName: String,
+    val categoryName: String,
+    val materialName: String,
+    val grade: String,
+    val pricePerKg: Double,
+    val currency: String,
+    val minQuantityKg: Double?,
+    val maxQuantityKg: Double?,
+    val condition: String,
+    val status: String,
+    val notes: String,
+    val effectiveFrom: Long,
+    val updatedAt: Long,
+    val updatedBy: String,
+    val version: Long
+)
+
+/** Immutable local copy of a reference-price change (server has its own trigger). */
+@Entity(tableName = "price_history")
+data class PriceHistoryEntity(
+    @PrimaryKey(autoGenerate = true) val historyId: Long = 0L,
+    val priceId: String,
+    val materialName: String,
+    val categoryName: String,
+    val grade: String,
+    val pricePerKg: Double,
+    val marketMin: Double,
+    val marketMax: Double,
+    val currency: String,
+    val changeType: String,
+    val changedBy: String,
+    val changedAt: Long,
+    val version: Long
+)
+
+/**
+ * Offline queue for price edits authored by an authorized user. [baseVersion]
+ * is the server version visible when the edit was made, so synchronization can
+ * refuse to overwrite a newer server row.
+ */
+@Entity(tableName = "price_change_queue")
+data class PriceChangeQueueEntity(
+    @PrimaryKey val queueId: String,
+    val kind: String,
+    val targetId: String,
+    val actorUserId: String,
+    val actorRole: String,
+    val payloadJson: String,
+    val baseVersion: Long,
+    val status: String,
+    val errorMessage: String?,
+    val serverVersion: Long?,
+    val createdAt: Long,
+    val updatedAt: Long
 )
 
 @Entity(tableName = "authorized_recyclers")

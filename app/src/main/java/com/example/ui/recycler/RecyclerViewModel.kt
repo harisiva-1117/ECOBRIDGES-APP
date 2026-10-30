@@ -10,12 +10,18 @@ import com.example.auth.SupabaseAuthService
 import com.example.data.CloudSyncManager
 import com.example.data.EwasteDatabase
 import com.example.data.EwasteRepository
+import com.example.data.OfferInput
+import com.example.data.PriceWriteResult
 import com.example.model.MaterialLot
+import com.example.model.PriceRecord
+import com.example.model.RecyclerOffer
+import com.example.model.RoleType
 import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -26,7 +32,12 @@ import kotlinx.coroutines.launch
  * admin) observe the same local rows. Cloud sync is optional best-effort;
  * the UI works fully offline.
  */
-class RecyclerViewModel(application: Application) : AndroidViewModel(application) {
+class RecyclerViewModel(
+    application: Application,
+    private val actorRecyclerId: String = "",
+    private val facilityName: String = "",
+    private val isDemoAccount: Boolean = false
+) : AndroidViewModel(application) {
 
     private companion object {
         const val TAG = "RecyclerViewModel"
@@ -43,6 +54,28 @@ class RecyclerViewModel(application: Application) : AndroidViewModel(application
 
     private val repository: EwasteRepository
 
+    // ---- Purchase offers (recycler-owned) -----------------------------------
+
+    private val _offers = MutableStateFlow<List<RecyclerOffer>>(emptyList())
+    val offers: StateFlow<List<RecyclerOffer>> = _offers.asStateFlow()
+
+    /** Government indicative reference prices, for side-by-side comparison. */
+    private val _referencePrices = MutableStateFlow<List<PriceRecord>>(emptyList())
+    val referencePrices: StateFlow<List<PriceRecord>> = _referencePrices.asStateFlow()
+
+    private val _priceMessage = MutableStateFlow<String?>(null)
+    val priceMessage: StateFlow<String?> = _priceMessage.asStateFlow()
+
+    private val _priceConflict = MutableStateFlow<String?>(null)
+    val priceConflict: StateFlow<String?> = _priceConflict.asStateFlow()
+
+    private val _isSavingPrice = MutableStateFlow(false)
+    val isSavingPrice: StateFlow<Boolean> = _isSavingPrice.asStateFlow()
+
+    /** The recycler id that owns this session's offers (resolved from the registry). */
+    private val _actingRecyclerId = MutableStateFlow(actorRecyclerId)
+    val actingRecyclerId: StateFlow<String> = _actingRecyclerId.asStateFlow()
+
     init {
         val database = EwasteDatabase.getDatabase(application, viewModelScope)
         repository = EwasteRepository(
@@ -55,13 +88,96 @@ class RecyclerViewModel(application: Application) : AndroidViewModel(application
             database.collectorLocationDao(),
             database.connectionRequestDao(),
             database.quotationDao(),
-            database.auditLogDao()
+            database.auditLogDao(),
+            database.recyclerOfferDao(),
+            database.priceHistoryDao(),
+            database.priceChangeQueueDao()
         )
         // Observe the shared local rows; a lot created by the collector appears
         // here without any network round-trip.
         viewModelScope.launch {
             repository.allLots.collect { lots -> _lots.value = lots }
         }
+        viewModelScope.launch {
+            repository.allRecyclerOffers.collect { offers -> _offers.value = offers }
+        }
+        viewModelScope.launch {
+            repository.activeReferencePrices.collect { prices -> _referencePrices.value = prices }
+        }
+        viewModelScope.launch {
+            _actingRecyclerId.value = resolveActingRecyclerId()
+        }
+    }
+
+    /**
+     * Resolves the `authorized_recyclers.recycler_id` that owns this session.
+     * The sign-in statutory identifier is the CPCB registration number, while
+     * offers reference the registry primary key, so both are matched.
+     */
+    private suspend fun resolveActingRecyclerId(): String {
+        if (actorRecyclerId.isBlank() && facilityName.isBlank()) return ""
+        val cached = runCatching { repository.allRecyclers.first() }.getOrDefault(emptyList())
+        val match = cached.firstOrNull { recycler ->
+            (actorRecyclerId.isNotBlank() &&
+                (recycler.cpcbRegNo.equals(actorRecyclerId, ignoreCase = true) ||
+                    recycler.recyclerId.equals(actorRecyclerId, ignoreCase = true))) ||
+                (facilityName.isNotBlank() && recycler.name.equals(facilityName, ignoreCase = true))
+        }
+        return match?.recyclerId ?: actorRecyclerId
+    }
+
+    /** Creates/updates an offer owned by this facility; never another recycler's. */
+    fun saveOffer(input: OfferInput) {
+        viewModelScope.launch {
+            _isSavingPrice.value = true
+            _priceConflict.value = null
+            val actingId = _actingRecyclerId.value.ifBlank { resolveActingRecyclerId() }
+            val uid = SupabaseAuthService.getInstance(getApplication())
+                .authenticatedUser.value?.userId ?: ""
+            val result = repository.saveRecyclerOffer(
+                input = input,
+                actorRole = RoleType.FORMAL_RECYCLER,
+                actorUserId = uid,
+                actorLabel = facilityName.ifBlank { actingId },
+                actorRecyclerId = actingId,
+                isDemoAccount = isDemoAccount
+            )
+            when (result) {
+                is PriceWriteResult.Saved -> {
+                    _priceMessage.value = if (result.localOnly) {
+                        "Offer saved locally. Will sync when online."
+                    } else {
+                        "Offer saved and synced to the server successfully."
+                    }
+                }
+                is PriceWriteResult.Rejected -> _priceMessage.value = result.errors.joinToString(" ")
+                is PriceWriteResult.Conflict -> {
+                    _priceConflict.value = result.message
+                    _priceMessage.value = null
+                }
+            }
+            _isSavingPrice.value = false
+        }
+    }
+
+    /** Pulls the authoritative offers/reference prices into the local cache. */
+    fun refreshOffers() {
+        viewModelScope.launch {
+            _isSyncing.value = true
+            try {
+                repository.refreshPriceCachesFromCloud()
+                _actingRecyclerId.value = resolveActingRecyclerId()
+            } catch (e: Exception) {
+                _lastError.value = e.message
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
+
+    fun clearPriceFeedback() {
+        _priceMessage.value = null
+        _priceConflict.value = null
     }
 
     /** Refresh the local cache from the cloud (best-effort). */
@@ -142,11 +258,16 @@ class RecyclerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun confirmRecyclerHandover(lotId: String, verifiedWeight: Double? = null, markPaid: Boolean = true) {
+    fun confirmRecyclerHandover(
+        lotId: String,
+        verifiedWeight: Double? = null,
+        markPaid: Boolean = true,
+        agreedRatePerKg: Double? = null
+    ) {
         viewModelScope.launch {
             _isSyncing.value = true
             try {
-                repository.confirmRecyclerHandover(lotId, verifiedWeight, markPaid)
+                repository.confirmRecyclerHandover(lotId, verifiedWeight, markPaid, agreedRatePerKg)
                 shareReceipt(lotId)
                 _lastError.value = null
             } catch (e: Exception) {
