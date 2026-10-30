@@ -37,6 +37,22 @@ export class VerifyOtpDto {
   role: RoleType;
 }
 
+export class DemoLoginDto {
+  @IsNotEmpty()
+  @IsString()
+  @Matches(/^[0-9]{10}$/, { message: 'Phone number must be exactly 10 digits' })
+  phoneNumber: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @Length(6, 6, { message: 'OTP must be 6 digits' })
+  otp: string;
+
+  @IsOptional()
+  @IsEnum(RoleType)
+  role?: RoleType;
+}
+
 export class EmailLoginDto {
   @IsNotEmpty()
   @IsEmail({}, { message: 'Please provide a valid email address' })
@@ -72,6 +88,10 @@ export interface AuthResponse {
   success: boolean;
   message: string;
   accessToken: string;
+  /** Supabase refresh token (returned so clients can rotate sessions). */
+  refreshToken?: string;
+  /** Access-token lifetime in seconds. */
+  expiresIn?: number;
   user: {
     id: string;
     email?: string;
@@ -81,6 +101,18 @@ export interface AuthResponse {
     status: AccountStatus;
     permissions: string[];
     statutoryIdentifier: string;
+    entityName: string;
+    /**
+     * True only for backend-issued hackathon demo sessions. These sessions are
+     * NOT Supabase sessions: they cannot write through PostgREST/RLS and every
+     * privileged write is re-checked by this backend.
+     */
+    isDemoAccount: boolean;
+    /**
+     * Server-resolved recycler facility (registry `recycler_id`) for recycler
+     * accounts. Clients must never derive this from a user-editable field.
+     */
+    facilityId?: string;
     dashboardRoute: string;
   };
 }

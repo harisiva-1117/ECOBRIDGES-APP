@@ -16,6 +16,11 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.storage.storage
 import kotlinx.serialization.Serializable
 import java.io.ByteArrayOutputStream
+import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.util.Date
+import java.util.Locale
 import kotlin.math.min
 import kotlin.math.pow
 
@@ -197,8 +202,101 @@ object CloudSyncManager {
         val trend_percentage: Double = 0.0,
         val unit: String = "₹/kg",
         val date_updated: String? = null,
-        val key_metals_joined: String? = null
+        val key_metals_joined: String? = null,
+        val grade: String? = null,
+        val currency: String? = null,
+        val is_active: Boolean = true,
+        val effective_date: String? = null,
+        val updated_at: String? = null,
+        val updated_by: String? = null,
+        val updated_by_label: String? = null,
+        val version: Long = 1L
     )
+
+    /** Payload for an admin reference-price create/update. */
+    @Serializable
+    data class PriceUpsertDto(
+        val price_id: String,
+        val category_name: String,
+        val sub_category: String,
+        val location: String,
+        val prevailing_buy_rate: Double,
+        val market_min: Double,
+        val market_max: Double,
+        val trend: String,
+        val trend_percentage: Double,
+        val unit: String = "₹/kg",
+        val date_updated: String,
+        val key_metals_joined: String,
+        val grade: String? = null,
+        val currency: String = "INR",
+        val is_active: Boolean = true,
+        val effective_date: String? = null,
+        val updated_by_label: String? = null
+    )
+
+    /** Recycler purchase offer row (`recycler_offered_rates`). */
+    @Serializable
+    data class RecyclerOfferDto(
+        val rate_id: String,
+        val recycler_id: String,
+        val category_name: String,
+        val rate_per_kg: Double = 0.0,
+        val unit: String = "₹/kg",
+        val grade: String? = null,
+        val condition: String? = null,
+        val min_quantity_kg: Double? = null,
+        val max_quantity_kg: Double? = null,
+        val status: String = "ACTIVE",
+        val notes: String? = null,
+        val effective_from: String? = null,
+        val updated_at: String? = null,
+        val updated_by_label: String? = null,
+        val version: Long = 1L
+    )
+
+    /** Payload for a recycler offer create/update. */
+    @Serializable
+    data class RecyclerOfferUpsertDto(
+        val rate_id: String,
+        val recycler_id: String,
+        val category_name: String,
+        val rate_per_kg: Double,
+        val unit: String = "₹/kg",
+        val grade: String? = null,
+        val condition: String? = null,
+        val min_quantity_kg: Double? = null,
+        val max_quantity_kg: Double? = null,
+        val status: String = "ACTIVE",
+        val notes: String? = null,
+        val updated_by_label: String? = null
+    )
+
+    /** One immutable reference-price change from `material_price_history`. */
+    @Serializable
+    data class PriceHistoryDto(
+        val history_id: Long = 0L,
+        val price_id: String,
+        val category_name: String,
+        val sub_category: String? = null,
+        val grade: String? = null,
+        val prevailing_buy_rate: Double = 0.0,
+        val market_min: Double = 0.0,
+        val market_max: Double = 0.0,
+        val currency: String? = null,
+        val change_type: String = "UPDATE",
+        val changed_by: String? = null,
+        val changed_by_label: String? = null,
+        val changed_at: String? = null,
+        val version: Long = 1L
+    )
+
+    /** Result of one queued price push. */
+    sealed interface PricePushResult {
+        data class Success(val serverVersion: Long?) : PricePushResult
+        data class Conflict(val message: String, val serverVersion: Long?) : PricePushResult
+        data class Failed(val message: String) : PricePushResult
+    }
 
     /** Read-only hazard-safety reference row (single source for all roles). */
     @Serializable
@@ -459,6 +557,153 @@ object CloudSyncManager {
         } catch (e: Exception) {
             Log.w(TAG, "Material prices fetch failed: ${e.message}")
             emptyList()
+        }
+    }
+
+    /** One reference price by id (used for conflict detection). */
+    suspend fun fetchPriceById(priceId: String): PriceDto? {
+        if (!SupabaseAuthConfig.isConfigured()) return null
+        return try {
+            SupabaseAuthConfig.client.from("material_prices")
+                .select { filter { eq("price_id", priceId) } }
+                .decodeSingleOrNull<PriceDto>()
+        } catch (e: Exception) {
+            Log.w(TAG, "Material price lookup failed: ${e.message}")
+            null
+        }
+    }
+
+    /** Recycler purchase offers. RLS returns active offers plus the caller's own. */
+    suspend fun fetchRecyclerOffers(): List<RecyclerOfferDto> {
+        if (!SupabaseAuthConfig.isConfigured()) return emptyList()
+        return try {
+            SupabaseAuthConfig.client.from("recycler_offered_rates")
+                .select()
+                .decodeList<RecyclerOfferDto>()
+        } catch (e: Exception) {
+            Log.w(TAG, "Recycler offers fetch failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Immutable price-change history (optional [priceId] filter). */
+    suspend fun fetchMaterialPriceHistory(priceId: String? = null): List<PriceHistoryDto> {
+        if (!SupabaseAuthConfig.isConfigured()) return emptyList()
+        return try {
+            if (priceId.isNullOrBlank()) {
+                SupabaseAuthConfig.client.from("material_price_history")
+                    .select()
+                    .decodeList<PriceHistoryDto>()
+            } else {
+                SupabaseAuthConfig.client.from("material_price_history")
+                    .select { filter { eq("price_id", priceId) } }
+                    .decodeList<PriceHistoryDto>()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Price history fetch failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * Version-checked reference-price upsert. The update is filtered on the
+     * version the editor saw; zero updated rows means the server moved on, and
+     * the caller must resolve the conflict instead of overwriting.
+     */
+    suspend fun pushReferencePrice(input: ReferencePriceInput): PricePushResult {
+        if (!SupabaseAuthConfig.isConfigured()) {
+            return PricePushResult.Failed("Supabase is not configured on this device.")
+        }
+        return try {
+            val dto = input.toUpsertDto()
+            if (input.baseVersion <= 0L) {
+                val inserted = try {
+                    SupabaseAuthConfig.client.from("material_prices")
+                        .insert(dto) { select() }
+                        .decodeList<PriceDto>()
+                } catch (insertError: Exception) {
+                    val server = fetchPriceById(input.priceId)
+                    if (server != null) {
+                        return PricePushResult.Conflict(
+                            "A price with this id already exists on the server.",
+                            server.version
+                        )
+                    }
+                    throw insertError
+                }
+                PricePushResult.Success(inserted.firstOrNull()?.version ?: 1L)
+            } else {
+                val updated = SupabaseAuthConfig.client.from("material_prices")
+                    .update(dto) {
+                        select()
+                        filter {
+                            eq("price_id", input.priceId)
+                            eq("version", input.baseVersion)
+                        }
+                    }
+                    .decodeList<PriceDto>()
+                if (updated.isEmpty()) {
+                    val server = fetchPriceById(input.priceId)
+                    PricePushResult.Conflict(
+                        "The price was changed on the server after this edit.",
+                        server?.version
+                    )
+                } else {
+                    PricePushResult.Success(updated.first().version)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Reference price push failed: ${e.message}")
+            PricePushResult.Failed(e.message ?: "Network error")
+        }
+    }
+
+    /** Version-checked recycler offer upsert (owner-only via RLS). */
+    suspend fun pushRecyclerOffer(input: OfferInput): PricePushResult {
+        if (!SupabaseAuthConfig.isConfigured()) {
+            return PricePushResult.Failed("Supabase is not configured on this device.")
+        }
+        return try {
+            val dto = input.toUpsertDto()
+            if (input.baseVersion <= 0L) {
+                val inserted = try {
+                    SupabaseAuthConfig.client.from("recycler_offered_rates")
+                        .insert(dto) { select() }
+                        .decodeList<RecyclerOfferDto>()
+                } catch (insertError: Exception) {
+                    val existing = fetchRecyclerOffers().firstOrNull { it.rate_id == input.offerId }
+                    if (existing != null) {
+                        return PricePushResult.Conflict(
+                            "This offer already exists on the server.",
+                            existing.version
+                        )
+                    }
+                    throw insertError
+                }
+                PricePushResult.Success(inserted.firstOrNull()?.version ?: 1L)
+            } else {
+                val updated = SupabaseAuthConfig.client.from("recycler_offered_rates")
+                    .update(dto) {
+                        select()
+                        filter {
+                            eq("rate_id", input.offerId)
+                            eq("version", input.baseVersion)
+                        }
+                    }
+                    .decodeList<RecyclerOfferDto>()
+                if (updated.isEmpty()) {
+                    val server = fetchRecyclerOffers().firstOrNull { it.rate_id == input.offerId }
+                    PricePushResult.Conflict(
+                        "The offer was changed on the server after this edit.",
+                        server?.version
+                    )
+                } else {
+                    PricePushResult.Success(updated.first().version)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Recycler offer push failed: ${e.message}")
+            PricePushResult.Failed(e.message ?: "Network error")
         }
     }
 
@@ -732,8 +977,103 @@ fun CloudSyncManager.PriceDto.toEntity(): PriceRecordEntity = PriceRecordEntity(
     trendPercentage = trend_percentage,
     unit = unit,
     dateUpdated = date_updated ?: "",
-    keyMetalsJoined = key_metals_joined ?: ""
+    keyMetalsJoined = key_metals_joined ?: "",
+    grade = grade ?: "",
+    currency = currency ?: "INR",
+    isActive = is_active,
+    effectiveDate = effective_date,
+    updatedAt = parseServerMillis(updated_at),
+    updatedBy = updated_by_label ?: updated_by ?: "",
+    version = version
 )
+
+private fun ReferencePriceInput.toUpsertDto(): CloudSyncManager.PriceUpsertDto =
+    CloudSyncManager.PriceUpsertDto(
+        price_id = priceId,
+        category_name = category.name,
+        sub_category = materialName.trim(),
+        location = location.trim(),
+        prevailing_buy_rate = pricePerKg,
+        market_min = marketMin,
+        market_max = marketMax,
+        trend = trend,
+        trend_percentage = trendPercentage,
+        date_updated = SimpleDateFormat("dd MMM yyyy", Locale.US)
+            .format(Date(System.currentTimeMillis())),
+        key_metals_joined = keyMetals.joinToString(","),
+        grade = grade.trim().ifBlank { null },
+        currency = currency.uppercase(),
+        is_active = isActive,
+        effective_date = effectiveDate,
+        updated_by_label = updatedByLabel.trim().ifBlank { null }
+    )
+
+private fun OfferInput.toUpsertDto(): CloudSyncManager.RecyclerOfferUpsertDto =
+    CloudSyncManager.RecyclerOfferUpsertDto(
+        rate_id = offerId,
+        recycler_id = recyclerId,
+        category_name = category.name,
+        rate_per_kg = pricePerKg,
+        grade = grade.trim().ifBlank { null },
+        condition = condition.trim().ifBlank { null },
+        min_quantity_kg = minQuantityKg,
+        max_quantity_kg = maxQuantityKg,
+        status = status.uppercase(),
+        notes = notes.trim().ifBlank { null },
+        updated_by_label = updatedByLabel.trim().ifBlank { null }
+    )
+
+fun CloudSyncManager.RecyclerOfferDto.toEntity(): RecyclerOfferEntity {
+    val category = runCatching { MaterialCategory.valueOf(category_name) }
+        .getOrDefault(MaterialCategory.PCB_BOARDS)
+    return RecyclerOfferEntity(
+        offerId = rate_id,
+        recyclerId = recycler_id,
+        recyclerName = "",
+        categoryName = category_name,
+        materialName = category.titleEn,
+        grade = grade ?: "",
+        pricePerKg = rate_per_kg,
+        currency = "INR",
+        minQuantityKg = min_quantity_kg,
+        maxQuantityKg = max_quantity_kg,
+        condition = condition ?: "",
+        status = status.uppercase(),
+        notes = notes ?: "",
+        effectiveFrom = parseServerMillis(effective_from),
+        updatedAt = parseServerMillis(updated_at),
+        updatedBy = updated_by_label ?: "",
+        version = version
+    )
+}
+
+fun CloudSyncManager.PriceHistoryDto.toEntity(): PriceHistoryEntity {
+    val category = runCatching { MaterialCategory.valueOf(category_name) }
+        .getOrDefault(MaterialCategory.PCB_BOARDS)
+    return PriceHistoryEntity(
+        historyId = if (history_id > 0L) history_id else 0L,
+        priceId = price_id,
+        materialName = sub_category?.ifBlank { null } ?: category.titleEn,
+        categoryName = category_name,
+        grade = grade ?: "",
+        pricePerKg = prevailing_buy_rate,
+        marketMin = market_min,
+        marketMax = market_max,
+        currency = currency ?: "INR",
+        changeType = change_type,
+        changedBy = changed_by_label ?: changed_by ?: "",
+        changedAt = parseServerMillis(changed_at),
+        version = version
+    )
+}
+
+/** Parses an ISO-8601 server timestamp (timestamptz) into epoch millis. */
+internal fun parseServerMillis(value: String?): Long {
+    if (value.isNullOrBlank()) return 0L
+    return runCatching { OffsetDateTime.parse(value).toInstant().toEpochMilli() }
+        .recoverCatching { Instant.parse(value).toEpochMilli() }
+        .getOrDefault(0L)
+}
 
 fun CloudSyncManager.SafetyGuidelineDto.toEntity(): SafetyGuidelineEntity = SafetyGuidelineEntity(
     id = guideline_id,

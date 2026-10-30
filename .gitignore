@@ -11,19 +11,49 @@
 .DS_Store
 build/
 *.apk
+*.aab
 /captures
 .externalNativeBuild
 .cxx
 local.properties
-debug.keystore
+*.jks
+*.keystore
+!debug.keystore
 *.log
 supabase/.temp/
 node_modules/
 dist/
 __pycache__/
 *.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# ---------------------------------------------------------------------------
+# Secrets: never commit real credentials. Only the *.example templates are
+# tracked. This covers .env, .env.backup, .env.local, backend/*/.env, etc.
+# ---------------------------------------------------------------------------
 .env
-.env.backup
-.env.example
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
 
+# Local secrets and backup files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.env.backup
 
+# Local secrets and backup files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.env.backup

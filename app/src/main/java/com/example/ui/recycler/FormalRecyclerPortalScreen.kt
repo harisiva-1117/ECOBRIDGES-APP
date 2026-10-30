@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -206,8 +207,9 @@ fun FormalRecyclerPortalScreen(
                     Triple(PortalLabels.getDashboardTab(language), Icons.Default.Home, 0),
                     Triple(PortalLabels.getInboundLotsTab(language), Icons.Default.Inventory2, 1),
                     Triple(PortalLabels.getWeighInTab(language), Icons.Default.Straighten, 2),
-                    Triple(PortalLabels.getReportsTab(language), Icons.Default.Description, 3),
-                    Triple(PortalLabels.getProfileTab(language), Icons.Default.Person, 4)
+                    Triple("My Offers", Icons.Default.Sell, 3),
+                    Triple(PortalLabels.getReportsTab(language), Icons.Default.Description, 4),
+                    Triple(PortalLabels.getProfileTab(language), Icons.Default.Person, 5)
                 )
                 recyclerTabs.forEach { (label, icon, index) ->
                     val selected = recyclerTab == index
@@ -632,11 +634,17 @@ fun FormalRecyclerPortalScreen(
                     viewModel.confirmRecyclerHandover(lotId, verifiedWeight = weight, markPaid = false)
                 }
             )
-            3 -> RecyclerReportsTab(
+            3 -> RecyclerOffersTab(
+                viewModel = viewModel,
+                facilityName = facilityName,
+                cpcbNumber = cpcbNumber,
+                language = language
+            )
+            4 -> RecyclerReportsTab(
                 lots = lots,
                 language = language
             )
-            4 -> RecyclerProfileTab(
+            5 -> RecyclerProfileTab(
                 facilityName = facilityName,
                 cpcbNumber = cpcbNumber,
                 language = language,

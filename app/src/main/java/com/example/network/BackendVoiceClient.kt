@@ -25,9 +25,26 @@ object BackendVoiceClient {
     private var nestJsBaseUrl: String = "http://10.0.2.2:3000"
     private var fastApiBaseUrl: String = "http://10.0.2.2:8000"
 
+    /**
+     * Supplies the current Supabase access token. The NestJS voice endpoint
+     * verifies the JWT signature and derives the role from the database, so an
+     * unauthenticated call is rejected with 401 and the app falls back to the
+     * local classifier. Set once from the UI layer.
+     */
+    private var authTokenProvider: (() -> String?)? = null
+
     fun configureEndpoints(nestUrl: String, fastApiUrl: String) {
         nestJsBaseUrl = nestUrl.removeSuffix("/")
         fastApiBaseUrl = fastApiUrl.removeSuffix("/")
+    }
+
+    fun configureAuthTokenProvider(provider: (() -> String?)?) {
+        authTokenProvider = provider
+    }
+
+    private fun applyAuthHeader(conn: HttpURLConnection) {
+        val token = authTokenProvider?.invoke()?.takeIf { it.isNotBlank() } ?: return
+        conn.setRequestProperty("Authorization", "Bearer $token")
     }
 
     /**
@@ -45,6 +62,7 @@ object BackendVoiceClient {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
+                applyAuthHeader(this)
                 connectTimeout = 3000
                 readTimeout = 3000
                 doOutput = true
@@ -52,7 +70,6 @@ object BackendVoiceClient {
 
             val body = JSONObject().apply {
                 put("transcript", transcript)
-                put("userRole", currentRole?.name)
                 put("context", JSONObject().apply {
                     put("currentScreen", currentScreen)
                     put("currentRole", currentRole?.name)

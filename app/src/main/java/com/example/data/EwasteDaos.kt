@@ -45,11 +45,93 @@ interface PriceDao {
     @Query("SELECT * FROM price_records ORDER BY prevailingBuyRate DESC")
     fun getAllPrices(): Flow<List<PriceRecordEntity>>
 
+    /** Only currently applicable (non-deactivated) reference prices. */
+    @Query("SELECT * FROM price_records WHERE isActive = 1 ORDER BY prevailingBuyRate DESC")
+    fun getActivePrices(): Flow<List<PriceRecordEntity>>
+
     @Query("SELECT * FROM price_records WHERE location = :location")
     fun getPricesByLocation(location: String): Flow<List<PriceRecordEntity>>
 
+    @Query("SELECT * FROM price_records ORDER BY prevailingBuyRate DESC")
+    suspend fun getAllPricesNow(): List<PriceRecordEntity>
+
+    @Query("SELECT * FROM price_records WHERE id = :id LIMIT 1")
+    suspend fun getPriceById(id: String): PriceRecordEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPrices(prices: List<PriceRecordEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPrice(price: PriceRecordEntity)
+
+    @Query("UPDATE price_records SET isActive = :isActive, version = :version, updatedAt = :updatedAt, updatedBy = :updatedBy WHERE id = :id")
+    suspend fun setActive(id: String, isActive: Boolean, version: Long, updatedAt: Long, updatedBy: String)
+}
+
+@Dao
+interface PriceHistoryDao {
+    @Query("SELECT * FROM price_history ORDER BY changedAt DESC")
+    fun getAll(): Flow<List<PriceHistoryEntity>>
+
+    @Query("SELECT * FROM price_history WHERE priceId = :priceId ORDER BY changedAt DESC")
+    fun getForPrice(priceId: String): Flow<List<PriceHistoryEntity>>
+
+    @Query("SELECT * FROM price_history WHERE priceId = :priceId ORDER BY changedAt DESC LIMIT 1")
+    suspend fun getLatestForPrice(priceId: String): PriceHistoryEntity?
+
+    @Insert
+    suspend fun insert(entry: PriceHistoryEntity)
+
+    @Insert
+    suspend fun insertAll(entries: List<PriceHistoryEntity>)
+}
+
+@Dao
+interface RecyclerOfferDao {
+    @Query("SELECT * FROM recycler_offers ORDER BY updatedAt DESC")
+    fun getAll(): Flow<List<RecyclerOfferEntity>>
+
+    @Query("SELECT * FROM recycler_offers WHERE status = 'ACTIVE' ORDER BY pricePerKg DESC")
+    fun getActive(): Flow<List<RecyclerOfferEntity>>
+
+    @Query("SELECT * FROM recycler_offers ORDER BY updatedAt DESC")
+    suspend fun getAllNow(): List<RecyclerOfferEntity>
+
+    @Query("SELECT * FROM recycler_offers WHERE recyclerId = :recyclerId ORDER BY updatedAt DESC")
+    suspend fun getForRecycler(recyclerId: String): List<RecyclerOfferEntity>
+
+    @Query("SELECT * FROM recycler_offers WHERE offerId = :offerId LIMIT 1")
+    suspend fun getById(offerId: String): RecyclerOfferEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(offer: RecyclerOfferEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(offers: List<RecyclerOfferEntity>)
+
+    @Query("DELETE FROM recycler_offers WHERE offerId = :offerId")
+    suspend fun delete(offerId: String)
+}
+
+@Dao
+interface PriceChangeQueueDao {
+    @Query("SELECT * FROM price_change_queue ORDER BY createdAt ASC")
+    fun getAll(): Flow<List<PriceChangeQueueEntity>>
+
+    @Query("SELECT * FROM price_change_queue WHERE status = 'PENDING' ORDER BY createdAt ASC")
+    suspend fun getPendingNow(): List<PriceChangeQueueEntity>
+
+    @Query("SELECT COUNT(*) FROM price_change_queue WHERE status = 'PENDING'")
+    fun getPendingCount(): Flow<Int>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(change: PriceChangeQueueEntity)
+
+    @Query("UPDATE price_change_queue SET status = :status, errorMessage = :errorMessage, serverVersion = :serverVersion, updatedAt = :updatedAt WHERE queueId = :queueId")
+    suspend fun updateStatus(queueId: String, status: String, errorMessage: String?, serverVersion: Long?, updatedAt: Long)
+
+    @Query("DELETE FROM price_change_queue WHERE queueId = :queueId")
+    suspend fun delete(queueId: String)
 }
 
 @Dao

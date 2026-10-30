@@ -4,9 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import androidx.annotation.VisibleForTesting
-import com.example.BuildConfig
 import com.example.model.RoleType
-import com.example.network.NestJsAuthClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.exception.AuthRestException
@@ -32,14 +30,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 
 /**
  * Authentication service backed by the real Supabase (GoTrue) REST API.
  *
  * Supabase is the single source of truth: identities live in Supabase Auth and
  * role/profile details live in the `profiles` table (auto-created server-side by
- * the `on_auth_user_created` trigger — see supabase/migrations/0002). The app
+ * the `on_auth_user_created` trigger â€” see supabase/migrations/0002). The app
  * never invents users, roles or sessions locally.
  *
  * Required flow for every role:
@@ -50,16 +47,18 @@ import kotlin.random.Random
  *   role + account-status verification against `profiles` ->
  *   correct role dashboard.
  *
- * OTP delivery is selected by the build-time variable `OTP_MODE`:
- *   - `OTP_MODE=demo` (default): after credentials are accepted, a random
- *     6-digit code is generated on-device, displayed on the OTP screen as a
- *     clearly labelled "Demo OTP" (never sent via SMS) and verified locally
- *     against the pending session (expiry, attempt limit, one-time use).
- *   - `OTP_MODE=sms` (production): the second factor must come from a real
- *     provider. Wire it inside [issuePendingOtp] — until then an explicit
- *     PROVIDER_NOT_CONFIGURED error is returned instead of faking success.
- *     (The legacy phone-first Supabase SMS path is still available when the
- *     provider is configured.)
+ * Demo sign-in is controlled by explicit build flags (see [DemoAuthConfig]):
+ *   - Debug/demo builds: a fixed, configurable 6-digit code (default `123456`)
+ *     is displayed on screen, clearly labelled "Demo OTP". It is never sent by
+ *     SMS. The demo profile carries a `DEMO-*` identifier and no Supabase JWT,
+ *     so it can never perform privileged backend operations.
+ *   - Production/release builds: demo login is disabled by default. A release
+ *     build can only enable it with BOTH `DEMO_LOGIN_ENABLED=true` and
+ *     `DEMO_LOGIN_ALLOW_RELEASE=true`. No SMS provider is implemented, so a
+ *     non-demo login fails closed with PROVIDER_NOT_CONFIGURED rather than
+ *     pretending the account was verified.
+ *
+ * This is NOT real identity verification and must not be presented as such.
  */
 class SupabaseAuthService private constructor(private val context: Context) {
 
@@ -69,17 +68,19 @@ class SupabaseAuthService private constructor(private val context: Context) {
     private val registeredAccountsPrefs: SharedPreferences =
         context.getSharedPreferences("registered_user_roles", Context.MODE_PRIVATE)
 
+    init {
+        com.example.network.BackendApiClient.configureTokenProvider {
+            _authenticatedUser.value?.sessionToken
+        }
+    }
+
     fun roleTitle(role: RoleType): String = when (role) {
         RoleType.INFORMAL_COLLECTOR -> "Informal Collector"
         RoleType.FORMAL_RECYCLER -> "Formal Recycler"
         RoleType.GOVERNMENT_ADMIN -> "Government Admin"
     }
 
-    fun roleToSlug(role: RoleType): String = when (role) {
-        RoleType.INFORMAL_COLLECTOR -> "informal_collector"
-        RoleType.FORMAL_RECYCLER -> "formal_recycler"
-        RoleType.GOVERNMENT_ADMIN -> "government_admin"
-    }
+    fun roleToSlug(role: RoleType): String = AuthValidation.roleToSlug(role)
 
     fun rememberLocalRegistration(identifier: String, role: RoleType) {
         val clean = identifier.trim()
@@ -151,9 +152,9 @@ class SupabaseAuthService private constructor(private val context: Context) {
     val authenticatedUser: StateFlow<UserProfile?> = _authenticatedUser.asStateFlow()
 
     /**
-     * Demo-mode only: the latest locally generated OTP shown on the OTP verification
-     * screen so testers can sign in without an SMS gateway. Always null when
-     * `OTP_MODE=sms` or when no code is active.
+     * Demo-mode only: the configured demo code shown on the verification screen
+     * so testers can sign in without an SMS gateway. Null when demo login is
+     * disabled or no challenge is active.
      */
     private val _devDisplayOtp = MutableStateFlow<String?>(null)
     val devDisplayOtp: StateFlow<String?> = _devDisplayOtp.asStateFlow()
@@ -175,9 +176,17 @@ class SupabaseAuthService private constructor(private val context: Context) {
     /** True while a credential-accepted login waits for its OTP. */
     fun hasPendingLogin(): Boolean = pendingOtpSession != null
 
-    /** True when `OTP_MODE=demo`; any value other than `sms` resolves to demo. */
-    private val demoOtpMode: Boolean =
-        !BuildConfig.OTP_MODE.trim().equals("sms", ignoreCase = true)
+    /**
+     * Demo/local sign-in (fixed on-device OTP, synthetic profile with no
+     * Supabase session) is controlled by the explicit build flags
+     * `DEMO_LOGIN_ENABLED` / `DEMO_LOGIN_ALLOW_RELEASE` in [DemoAuthConfig].
+     * It is ON by default in debug builds and OFF by default in release builds.
+     *
+     * A demo session never obtains a Supabase JWT, so privileged backend
+     * operations remain unreachable even while the demo flow is enabled.
+     */
+    private val demoAuthAllowed: Boolean = DemoAuthConfig.isAvailable
+
 
     companion object {
         private const val TAG = "SupabaseAuthService"
@@ -217,18 +226,58 @@ class SupabaseAuthService private constructor(private val context: Context) {
     private fun isConfigured(): Boolean = SupabaseAuthConfig.isConfigured()
 
     /**
-     * True when the on-device (no-SMS) demo OTP flow is active (`OTP_MODE=demo`).
-     * The UI uses this to label the flow as Demo Mode and surface the generated code.
+     * True when the on-device (no-SMS) demo OTP flow is active in this build.
+     * The UI uses this to label the flow as Demo Mode and show the configured
+     * demo code.
      */
-    fun isDemoOtpMode(): Boolean = demoOtpMode
+    fun isDemoOtpMode(): Boolean = demoAuthAllowed
+
+    /** The configurable demo code shown to the tester (default `123456`). */
+    fun demoOtpCode(): String = DemoAuthConfig.otpCode
+
+    /** Admin demo is only honoured when explicitly configured for this build. */
+    fun isDemoAdminEnabled(): Boolean = DemoAuthConfig.adminEnabled
+
+    /** Safe description of the configured demo accounts for the login screen. */
+    fun demoAccountHint(): String = DemoAuthConfig.describeAccounts()
 
     /**
      * Legacy phone-first verification-code request. Kept ONLY for `OTP_MODE=sms`
      * with a real SMS provider: the code is generated, delivered and verified by
-     * Supabase. In demo mode phone-first login is disabled on purpose — sign-in
+     * Supabase. In demo mode phone-first login is disabled on purpose â€” sign-in
      * starts with the registered email + password (see [loginWithEmail]), so
      * unregistered numbers can never open a session.
      */
+    /**
+     * Demo-only role gate. Admin is never self-selected: it needs an explicit
+     * build flag AND a phone listed as an admin demo account. A phone listed in
+     * `DEMO_ACCOUNTS` may only open the role configured for it; other numbers
+     * fall back to their real registered role when one exists.
+     */
+    private suspend fun demoRoleError(cleanPhone: String, requestedRole: RoleType): String? {
+        val configuredRole = DemoAuthConfig.configuredRoleFor(cleanPhone)
+        if (requestedRole == RoleType.GOVERNMENT_ADMIN) {
+            return if (DemoAuthConfig.canUseRole(requestedRole, cleanPhone)) {
+                null
+            } else {
+                "Admin demo is disabled in this build, or +91 $cleanPhone is not configured as an admin demo account."
+            }
+        }
+        if (configuredRole != null) {
+            return if (configuredRole == requestedRole) {
+                null
+            } else {
+                "This demo number is configured for the ${roleTitle(configuredRole)} portal only."
+            }
+        }
+        val registeredRole = checkRegisteredRole(cleanPhone)
+        return if (registeredRole != null && registeredRole != requestedRole) {
+            "Access Denied: Mobile number +91 $cleanPhone is registered as ${roleTitle(registeredRole)}. You cannot log in to the ${roleTitle(requestedRole)} portal."
+        } else {
+            null
+        }
+    }
+
     suspend fun generateAndSendOtp(
         destination: OtpDeliveryDestination = OtpDeliveryDestination.MOBILE_SMS,
         phoneNumber: String,
@@ -236,27 +285,32 @@ class SupabaseAuthService private constructor(private val context: Context) {
         googleAccount: String? = null,
         targetRole: RoleType? = null
     ): Result<String> {
+        if (!demoAuthAllowed) {
+            return Result.failure(
+                IllegalStateException(
+                    "Demo sign-in is disabled in this build. Configure a real authentication provider before signing in."
+                )
+            )
+        }
+
         val cleanPhone = phoneNumber.filter { it.isDigit() }.let {
             if (it.length >= 10) it.takeLast(10) else it
-        }.ifBlank { "9876543210" }
+        }
+        if (cleanPhone.length != 10) {
+            return Result.failure(IllegalArgumentException("Please enter a valid 10-digit mobile number."))
+        }
 
-        // Strict role pre-check: prevent cross-role OTP requests
-        if (targetRole != null) {
-            val registeredRole = checkRegisteredRole(cleanPhone)
-            if (registeredRole != null && registeredRole != targetRole) {
-                val registeredTitle = roleTitle(registeredRole)
-                val targetTitle = roleTitle(targetRole)
-                Log.w(TAG, "Phone OTP rejected for +91 $cleanPhone: registered as $registeredTitle, requested $targetTitle")
-                return Result.failure(
-                    IllegalStateException(
-                        "Access Denied: Mobile number +91 $cleanPhone is registered as $registeredTitle. You cannot log in to the $targetTitle portal."
-                    )
-                )
-            }
+        val requestedRole = targetRole ?: RoleType.INFORMAL_COLLECTOR
+        val roleError = demoRoleError(cleanPhone, requestedRole)
+        if (roleError != null) {
+            Log.w(TAG, "Demo OTP rejected for +91 $cleanPhone: $roleError")
+            return Result.failure(IllegalStateException(roleError))
         }
 
         val now = System.currentTimeMillis()
-        val code = String.format("%06d", Random.nextInt(100000, 999999))
+        // Fixed, build-time configurable demo code. Nothing is generated
+        // randomly and nothing is transmitted: this is a demo, not a real OTP.
+        val code = DemoAuthConfig.otpCode
         activeOtpSession = OtpSession(
             destination = destination,
             phoneNumber = cleanPhone,
@@ -315,42 +369,65 @@ class SupabaseAuthService private constructor(private val context: Context) {
         enteredOtp: String,
         targetRole: RoleType
     ): AuthResult {
+        if (!demoAuthAllowed) {
+            return failure(
+                AuthErrorCode.PROVIDER_NOT_CONFIGURED,
+                AuthPipelineStep.AUTHENTICATING_USER,
+                "Demo sign-in is disabled in this build. Configure a real authentication provider before signing in."
+            )
+        }
+
         val clean = enteredOtp.trim()
-        if (clean.length != 6) {
+        if (!AuthValidation.isValidOtpFormat(clean)) {
             return failure(AuthErrorCode.INVALID_OTP, AuthPipelineStep.AUTHENTICATING_USER, "Please enter the complete 6-digit code.")
         }
 
         val session = activeOtpSession
-        val expectedOtp = session?.otpCode ?: _devDisplayOtp.value
-        if (expectedOtp.isNullOrBlank()) {
-            return failure(AuthErrorCode.OTP_NOT_REQUESTED, AuthPipelineStep.AUTHENTICATING_USER, "No active verification code. Please request a new OTP.")
-        }
-
-        if (clean != expectedOtp) {
-            return failure(AuthErrorCode.INVALID_OTP, AuthPipelineStep.AUTHENTICATING_USER, "Incorrect code. Please enter the displayed OTP.")
+        when (
+            DemoOtpVerifier.verify(
+                configuredCode = DemoAuthConfig.otpCode,
+                challengeCode = session?.otpCode ?: _devDisplayOtp.value,
+                enteredCode = clean
+            )
+        ) {
+            DemoOtpVerification.SUCCESS -> Unit
+            DemoOtpVerification.NO_ACTIVE_CHALLENGE ->
+                return failure(
+                    AuthErrorCode.OTP_NOT_REQUESTED,
+                    AuthPipelineStep.AUTHENTICATING_USER,
+                    "No active verification code. Please request the demo OTP first."
+                )
+            DemoOtpVerification.MALFORMED ->
+                return failure(
+                    AuthErrorCode.INVALID_OTP,
+                    AuthPipelineStep.AUTHENTICATING_USER,
+                    "Please enter the complete 6-digit code."
+                )
+            DemoOtpVerification.MISMATCH ->
+                return failure(
+                    AuthErrorCode.INVALID_OTP,
+                    AuthPipelineStep.AUTHENTICATING_USER,
+                    "Incorrect demo code. Enter the code shown on screen."
+                )
         }
 
         val cleanPhone = phoneNumber?.filter { it.isDigit() }?.takeLast(10)?.ifBlank { null }
             ?: session?.phoneNumber?.filter { it.isDigit() }?.takeLast(10)?.ifBlank { null }
-            ?: "9876543210"
+        if (cleanPhone == null || cleanPhone.length != 10) {
+            return failure(AuthErrorCode.INVALID_OTP, AuthPipelineStep.AUTHENTICATING_USER, "A valid mobile number is required.")
+        }
 
-        // Dynamic role binding: check registered role across local cache, Supabase, and NestJS
-        val registeredRole = checkRegisteredRole(cleanPhone)
-            ?: try {
-                NestJsAuthClient.lookupRegisteredRole(cleanPhone)?.let { mapRole(it) }
-            } catch (e: Exception) {
-                null
-            }
-        if (registeredRole != null && registeredRole != targetRole) {
+        // The demo portal can only be entered with the role configured for this
+        // number (or its real registered role). Admin is never self-assigned.
+        val roleError = demoRoleError(cleanPhone, targetRole)
+        if (roleError != null) {
             activeOtpSession = null
             _devDisplayOtp.value = null
-            val registeredTitle = roleTitle(registeredRole)
-            val targetTitle = roleTitle(targetRole)
-            Log.w(TAG, "Cross-role OTP login blocked for +91 $cleanPhone: registered as $registeredTitle, requested $targetTitle")
+            Log.w(TAG, "Demo role check blocked +91 $cleanPhone for ${targetRole.name}: $roleError")
             return failure(
-                AuthErrorCode.ROLE_MISMATCH,
+                if (targetRole == RoleType.GOVERNMENT_ADMIN) AuthErrorCode.PROVIDER_NOT_CONFIGURED else AuthErrorCode.ROLE_MISMATCH,
                 AuthPipelineStep.VERIFYING_ROLE,
-                "Access Denied: Mobile number +91 $cleanPhone is registered as $registeredTitle. You cannot log in to the $targetTitle portal."
+                roleError
             )
         }
 
@@ -361,12 +438,37 @@ class SupabaseAuthService private constructor(private val context: Context) {
         rememberLocalRegistration(cleanPhone, targetRole)
         email?.let { rememberLocalRegistration(it, targetRole) }
 
-        val profileUser = createDemoProfile(
-            role = targetRole,
-            phone = cleanPhone,
-            email = email ?: "${cleanPhone}@ecobridges.demo",
-            authMethod = AuthMethod.OTP_AUTHENTICATION
+        val backendLogin = com.example.network.BackendApiClient.demoLogin(
+            phoneNumber = cleanPhone,
+            otp = clean,
+            role = targetRole
         )
+
+        val profileUser = if (backendLogin.success && backendLogin.user != null) {
+            UserProfile(
+                userId = backendLogin.user.id,
+                displayName = backendLogin.user.displayName,
+                email = backendLogin.user.email ?: email ?: "${cleanPhone}@ecobridges.demo",
+                phoneNumber = backendLogin.user.phoneNumber ?: "+91 $cleanPhone",
+                role = backendLogin.user.role,
+                accountStatus = AccountStatus.ACTIVE,
+                permissions = backendLogin.user.permissions.takeIf { it.isNotEmpty() } ?: defaultPermissionsOf(targetRole),
+                statutoryIdentifier = backendLogin.user.statutoryIdentifier,
+                entityName = backendLogin.user.entityName,
+                sessionToken = backendLogin.accessToken ?: "demo-session-token",
+                authMethod = AuthMethod.OTP_AUTHENTICATION,
+                isDemoAccount = backendLogin.user.isDemoAccount,
+                facilityId = backendLogin.user.facilityId ?: "",
+                verifiedTimestamp = System.currentTimeMillis()
+            )
+        } else {
+            createDemoProfile(
+                role = targetRole,
+                phone = cleanPhone,
+                email = email ?: "${cleanPhone}@ecobridges.demo",
+                authMethod = AuthMethod.OTP_AUTHENTICATION
+            )
+        }
         _authenticatedUser.value = profileUser
         saveSession(profileUser)
         _currentPipelineStep.value = AuthPipelineStep.SUCCESS
@@ -391,7 +493,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
     )
 
     /**
-     * Step 1 — Register a new account in Supabase for the given role.
+     * Step 1 â€” Register a new account in Supabase for the given role.
      *
      * Creates the identity with Supabase Auth (email + password) and passes the
      * remaining details as user_metadata; the server-side `on_auth_user_created`
@@ -445,7 +547,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
                 }
             }
             RoleType.GOVERNMENT_ADMIN -> {
-                // Admin accounts are provisioned centrally by CPCB — there is
+                // Admin accounts are provisioned centrally by CPCB â€” there is
                 // no self-registration for this portal.
                 return failure(
                     AuthErrorCode.ROLE_MISMATCH,
@@ -497,25 +599,11 @@ class SupabaseAuthService private constructor(private val context: Context) {
             )
         }
 
-        // Direct upsert to ensure public.profiles row exists with exact role
-        try {
-            SupabaseAuthConfig.client.from("profiles").upsert(
-                buildJsonObject {
-                    put("auth_user_id", JsonPrimitive(user.id))
-                    put("role", JsonPrimitive(roleToSlug(targetRole)))
-                    put("account_status", JsonPrimitive("active"))
-                    put("display_name", JsonPrimitive(name))
-                    put("entity_name", JsonPrimitive(entity))
-                    put("statutory_identifier", JsonPrimitive(statutory))
-                    put("phone_number", JsonPrimitive("+91 ${cleanPhone.takeLast(10)}"))
-                    put("email", JsonPrimitive(trimmedEmail))
-                }
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Direct profile upsert note: ${e.message}")
-        }
-
-        // The trigger provisions the profile in the same transaction — poll briefly.
+        // Profiles are provisioned server-side by the on_auth_user_created
+        // trigger (supabase/migrations/0002 + 0007). The client must never
+        // insert its own role/account_status: that would let any user
+        // self-assign government_admin. If the trigger did not run, sign-up
+        // fails honestly instead of writing a privileged row.
         var profile: ProfileRow? = null
         repeat(PROFILE_FETCH_RETRIES) {
             profile = fetchProfile(user.id)
@@ -559,7 +647,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
     }
 
     /**
-     * Step 2 — Sign in with the REGISTERED email + password.
+     * Step 2 â€” Sign in with the REGISTERED email + password.
      *
      * Credentials are validated by Supabase Auth: unknown emails and wrong
      * passwords fail here and nothing proceeds. The user's role is verified
@@ -634,22 +722,31 @@ class SupabaseAuthService private constructor(private val context: Context) {
                         "Access Denied: This account is registered as $regTitle. You cannot log in to the $targetTitle portal."
                     )
                 }
-                if (assignedRole == null && profile == null) {
+                if (assignedRole == null) {
                     signOut()
                     return failure(
                         AuthErrorCode.ROLE_NOT_ASSIGNED,
                         AuthPipelineStep.VERIFYING_ROLE,
-                        "No profile assigned to this account. Contact the CPCB helpdesk to complete onboarding."
+                        "No role has been assigned to this account. Contact the administrator to complete onboarding."
                     )
                 }
             }
         } else {
-            // Unconfigured/demo mode: require account to match registered role
-            if (registeredRole != null && registeredRole != targetRole) {
+            // No Supabase project configured: only an explicit local demo
+            // build may proceed, and only for an account that was registered
+            // locally with exactly this role.
+            if (!demoAuthAllowed) {
+                return failure(
+                    AuthErrorCode.PROVIDER_NOT_CONFIGURED,
+                    AuthPipelineStep.AUTHENTICATING_USER,
+                    "Authentication provider is not configured in this build."
+                )
+            }
+            if (registeredRole == null || registeredRole != targetRole) {
                 return failure(
                     AuthErrorCode.ROLE_MISMATCH,
                     AuthPipelineStep.VERIFYING_ROLE,
-                    "Access Denied: This account is registered as ${roleTitle(registeredRole)}. You cannot log in to the ${roleTitle(targetRole)} portal."
+                    "No registered ${roleTitle(targetRole)} account matches these credentials."
                 )
             }
         }
@@ -658,7 +755,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
         rememberLocalRegistration(trimmedEmail, targetRole)
 
         val effectiveUserId = userId ?: "usr-${trimmedEmail.hashCode()}"
-        Log.i(TAG, "Credentials accepted for $trimmedEmail — issuing OTP challenge for ${targetRole.name}")
+        Log.i(TAG, "Credentials accepted for $trimmedEmail â€” issuing OTP challenge for ${targetRole.name}")
         return issuePendingOtp(effectiveUserId, trimmedEmail, targetRole)
     }
 
@@ -842,8 +939,8 @@ class SupabaseAuthService private constructor(private val context: Context) {
 
     // -----------------------------------------------------------------------
     // OTP SECOND FACTOR for credential-accepted logins.
-    // OTP_MODE=demo: random on-device code, displayed in the app (dev only).
-    // OTP_MODE=sms:  production hook — wire a real provider in issuePendingOtp.
+    // Demo build: the fixed, configurable demo code is displayed in the app.
+    // Production: no SMS provider is implemented, so this fails closed.
     // -----------------------------------------------------------------------
 
     /**
@@ -852,8 +949,20 @@ class SupabaseAuthService private constructor(private val context: Context) {
      * only after [verifyLoginOtp] confirms the code and the role check passes.
      */
     private fun issuePendingOtp(authUserId: String, email: String, targetRole: RoleType): AuthResult {
+        // A second factor is only meaningful when a real out-of-band channel
+        // exists. Demo codes are debug-only, so a release build must fail shut
+        // instead of showing a code the user could never legitimately receive.
+        if (!demoAuthAllowed) {
+            signOut()
+            return failure(
+                AuthErrorCode.PROVIDER_NOT_CONFIGURED,
+                AuthPipelineStep.VERIFYING_ROLE,
+                "A verified second factor is required, but no OTP provider is configured in this build. Sign-in cannot be completed."
+            )
+        }
+
         val now = System.currentTimeMillis()
-        val code = String.format("%06d", Random.nextInt(100000, 999999))
+        val code = DemoAuthConfig.otpCode
         pendingOtpSession = OtpSession(
             destination = OtpDeliveryDestination.REGISTERED_EMAIL,
             email = email,
@@ -893,7 +1002,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
         val pending = pendingOtpSession
             ?: return Result.failure(IllegalStateException(AuthErrorCode.OTP_NOT_REQUESTED.userMessage))
         val now = System.currentTimeMillis()
-        val code = String.format("%06d", Random.nextInt(100000, 999999))
+        val code = DemoAuthConfig.otpCode
         pendingOtpSession = pending.copy(
             otpCode = code,
             createdAt = now,
@@ -925,7 +1034,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
     }
 
     /**
-     * Step 3 — verifies the OTP second factor for the pending login.
+     * Step 3 â€” verifies the OTP second factor for the pending login.
      * When correct code is entered, completes login successfully for the targetRole.
      */
     suspend fun verifyLoginOtp(
@@ -963,14 +1072,19 @@ class SupabaseAuthService private constructor(private val context: Context) {
         }
 
         val clean = enteredOtp.trim()
-        if (clean.length != 6) {
+        if (!AuthValidation.isValidOtpFormat(clean)) {
             return failure(
                 AuthErrorCode.INVALID_OTP, AuthPipelineStep.AUTHENTICATING_USER,
                 "Please enter the complete 6-digit code."
             )
         }
 
-        if (clean != session.otpCode && clean != _devDisplayOtp.value) {
+        val verification = DemoOtpVerifier.verify(
+            configuredCode = DemoAuthConfig.otpCode,
+            challengeCode = session.otpCode ?: _devDisplayOtp.value,
+            enteredCode = clean
+        )
+        if (verification != DemoOtpVerification.SUCCESS) {
             session.attemptsRemaining -= 1
             if (session.attemptsRemaining <= 0) {
                 session.isLocked = true
@@ -987,7 +1101,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
             )
         }
 
-        // OTP matched — a live GoTrue session means the registered (dynamic)
+        // OTP matched â€” a live GoTrue session means the registered (dynamic)
         // flow: resolve role/profile from the database. Any pipeline failure
         // is returned honestly instead of silently downgrading to a local
         // demo login, so portals never open with empty data and no reason.
@@ -998,7 +1112,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
             null
         }
         if (supabaseUser != null && (session.authUserId == null || supabaseUser.id == session.authUserId)) {
-            Log.i(TAG, "Live session for ${supabaseUser.email} — resolving dynamic profile")
+            Log.i(TAG, "Live session for ${supabaseUser.email} â€” resolving dynamic profile")
             val remoteResult = executePostAuthPipeline(
                 authMethod = AuthMethod.EMAIL_PASSWORD,
                 targetRole = targetRole,
@@ -1019,25 +1133,74 @@ class SupabaseAuthService private constructor(private val context: Context) {
             return remoteResult
         }
 
-        // Demo or unconfigured mode: ensure account was not registered under a different role
-        val registeredRole = checkRegisteredRole(session.email ?: "")
-        if (registeredRole != null && registeredRole != targetRole) {
+        // No live GoTrue session: this is the explicit local demo path.
+        if (!demoAuthAllowed) {
             cancelPendingLogin()
             return failure(
-                AuthErrorCode.ROLE_MISMATCH,
-                AuthPipelineStep.VERIFYING_ROLE,
-                "Access Denied: This account is registered as ${roleTitle(registeredRole)}. You cannot log in to the ${roleTitle(targetRole)} portal."
+                AuthErrorCode.PROVIDER_NOT_CONFIGURED,
+                AuthPipelineStep.AUTHENTICATING_USER,
+                "Demo sign-in is disabled in this build. Configure a real authentication provider before signing in."
             )
         }
 
-        Log.i(TAG, "No live session — demo login for ${session.email} as ${targetRole.name}")
-        val profileUser = createDemoProfile(
-            role = targetRole,
-            phone = "9876543210",
-            email = session.email,
-            authMethod = AuthMethod.EMAIL_PASSWORD,
-            customName = session.email?.substringBefore("@")?.replace(".", " ")?.replaceFirstChar { it.uppercase() }
+        // A demo login may only use the role configured for this phone number,
+        // or the role registered for the identity. Admin is never self-assigned.
+        val demoPhone = session.phoneNumber.orEmpty()
+        val configuredRole = DemoAuthConfig.configuredRoleFor(demoPhone)
+        val registeredRole = checkRegisteredRole(session.email ?: demoPhone)
+        val roleError = when {
+            !DemoAuthConfig.canUseRole(targetRole, demoPhone) ->
+                "Admin demo is disabled in this build, or this number is not a configured admin demo account."
+            configuredRole != null && configuredRole != targetRole ->
+                "This demo number is configured for the ${roleTitle(configuredRole)} portal only."
+            configuredRole == null && registeredRole != null && registeredRole != targetRole ->
+                "No registered ${roleTitle(targetRole)} account matches this identity."
+            configuredRole == null && registeredRole == null ->
+                "Use a configured demo account for this local demo build."
+            else -> null
+        }
+        if (roleError != null) {
+            cancelPendingLogin()
+            return failure(
+                if (targetRole == RoleType.GOVERNMENT_ADMIN) AuthErrorCode.PROVIDER_NOT_CONFIGURED else AuthErrorCode.ROLE_MISMATCH,
+                AuthPipelineStep.VERIFYING_ROLE,
+                roleError
+            )
+        }
+
+        Log.i(TAG, "No live session â€” demo login for ${session.email} as ${targetRole.name}")
+        val backendLogin = com.example.network.BackendApiClient.demoLogin(
+            phoneNumber = demoPhone,
+            otp = clean,
+            role = targetRole
         )
+
+        val profileUser = if (backendLogin.success && backendLogin.user != null) {
+            UserProfile(
+                userId = backendLogin.user.id,
+                displayName = backendLogin.user.displayName,
+                email = backendLogin.user.email ?: session.email ?: "${demoPhone}@ecobridges.demo",
+                phoneNumber = backendLogin.user.phoneNumber ?: "+91 $demoPhone",
+                role = backendLogin.user.role,
+                accountStatus = AccountStatus.ACTIVE,
+                permissions = backendLogin.user.permissions.takeIf { it.isNotEmpty() } ?: defaultPermissionsOf(targetRole),
+                statutoryIdentifier = backendLogin.user.statutoryIdentifier,
+                entityName = backendLogin.user.entityName,
+                sessionToken = backendLogin.accessToken ?: "demo-session-token",
+                authMethod = AuthMethod.EMAIL_PASSWORD,
+                isDemoAccount = backendLogin.user.isDemoAccount,
+                facilityId = backendLogin.user.facilityId ?: "",
+                verifiedTimestamp = System.currentTimeMillis()
+            )
+        } else {
+            createDemoProfile(
+                role = targetRole,
+                phone = session.phoneNumber.orEmpty(),
+                email = session.email,
+                authMethod = AuthMethod.EMAIL_PASSWORD,
+                customName = session.email?.substringBefore("@")?.replace(".", " ")?.replaceFirstChar { it.uppercase() }
+            )
+        }
         _authenticatedUser.value = profileUser
         saveSession(profileUser)
         pendingOtpSession = null
@@ -1057,28 +1220,30 @@ class SupabaseAuthService private constructor(private val context: Context) {
         authMethod: AuthMethod = AuthMethod.OTP_AUTHENTICATION,
         customName: String? = null
     ): UserProfile {
-        val cleanPhone = phone.filter { it.isDigit() }.takeLast(10).ifBlank { "9876543210" }
+        val cleanPhone = phone.filter { it.isDigit() }.takeLast(10)
         val name = customName?.takeIf { it.isNotBlank() } ?: when (role) {
-            RoleType.INFORMAL_COLLECTOR -> "Kabadiwala Aggregator"
-            RoleType.FORMAL_RECYCLER -> "Rule 13 Recycling Facility"
-            RoleType.GOVERNMENT_ADMIN -> "CPCB Regulatory Inspector"
+            RoleType.INFORMAL_COLLECTOR -> "Demo Collector"
+            RoleType.FORMAL_RECYCLER -> "Demo Recycler (unverified)"
+            RoleType.GOVERNMENT_ADMIN -> "Demo Administrator"
         }
+        // Demo identifiers are deliberately prefixed so they can never be
+        // mistaken for a CPCB registration number or an EPR certificate.
         val statutory = when (role) {
-            RoleType.INFORMAL_COLLECTOR -> "AGG-${cleanPhone.takeLast(6)}"
-            RoleType.FORMAL_RECYCLER -> "CPCB-AUTH-2026-REC"
-            RoleType.GOVERNMENT_ADMIN -> "CPCB-OFFICER-001"
+            RoleType.INFORMAL_COLLECTOR -> "DEMO-AGG-${cleanPhone.takeLast(6).ifBlank { "000000" }}"
+            RoleType.FORMAL_RECYCLER -> "DEMO-RECYCLER-NOT-VERIFIED"
+            RoleType.GOVERNMENT_ADMIN -> "DEMO-ADMIN-NOT-AUTHORISED"
         }
         val entity = when (role) {
-            RoleType.INFORMAL_COLLECTOR -> "Green Earth Aggregators"
-            RoleType.FORMAL_RECYCLER -> "EcoClean Authorized Recyclers Pvt Ltd"
-            RoleType.GOVERNMENT_ADMIN -> "Central Pollution Control Board"
+            RoleType.INFORMAL_COLLECTOR -> "Demo Aggregator (local data only)"
+            RoleType.FORMAL_RECYCLER -> "Demo Recycling Facility (not CPCB verified)"
+            RoleType.GOVERNMENT_ADMIN -> "Demo Administrator (not a government account)"
         }
 
         return UserProfile(
-            userId = "usr-${cleanPhone}-${role.name.lowercase()}",
+            userId = "demo-${cleanPhone.ifBlank { "user" }}-${role.name.lowercase()}",
             displayName = name,
-            email = email ?: "${cleanPhone}@ecobridges.demo",
-            phoneNumber = "+91 $cleanPhone",
+            email = email ?: "${cleanPhone.ifBlank { "demo" }}@ecobridges.demo",
+            phoneNumber = cleanPhone.takeIf { it.length == 10 }?.let { "+91 $it" },
             role = role,
             accountStatus = AccountStatus.ACTIVE,
             permissions = defaultPermissionsOf(role),
@@ -1086,6 +1251,7 @@ class SupabaseAuthService private constructor(private val context: Context) {
             entityName = entity,
             sessionToken = "demo-session-token",
             authMethod = authMethod,
+            isDemoAccount = true,
             verifiedTimestamp = System.currentTimeMillis()
         )
     }
@@ -1213,9 +1379,11 @@ class SupabaseAuthService private constructor(private val context: Context) {
             putString("role", profile.role.name)
             putString("status", profile.accountStatus.name)
             putString("statutory_id", profile.statutoryIdentifier)
+            putString("facility_id", profile.facilityId)
             putString("entity_name", profile.entityName)
             putString("token", profile.sessionToken)
             putString("auth_method", profile.authMethod.name)
+            putBoolean("is_demo_account", profile.isDemoAccount)
             putLong("verified_time", profile.verifiedTimestamp)
             apply()
         }
@@ -1238,15 +1406,13 @@ class SupabaseAuthService private constructor(private val context: Context) {
             entityName = prefs.getString("entity_name", "") ?: "",
             sessionToken = prefs.getString("token", "") ?: "",
             authMethod = AuthMethod.valueOf(prefs.getString("auth_method", AuthMethod.MOBILE_OTP.name) ?: AuthMethod.MOBILE_OTP.name),
+            isDemoAccount = prefs.getBoolean("is_demo_account", false),
+            facilityId = prefs.getString("facility_id", "") ?: "",
             verifiedTimestamp = prefs.getLong("verified_time", System.currentTimeMillis())
         )
     }
 
-    private fun mapRole(value: String?): RoleType? = when (value?.trim()?.lowercase()) {        "informal_collector", "collector" -> RoleType.INFORMAL_COLLECTOR
-        "formal_recycler", "recycler" -> RoleType.FORMAL_RECYCLER
-        "government_admin", "admin" -> RoleType.GOVERNMENT_ADMIN
-        else -> null
-    }
+    private fun mapRole(value: String?): RoleType? = AuthValidation.slugToRole(value)
 
     private fun mapStatus(value: String?): AccountStatus = when (value?.trim()?.lowercase()) {
         "pending", "pending_verification" -> AccountStatus.PENDING_VERIFICATION

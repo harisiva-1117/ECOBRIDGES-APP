@@ -76,6 +76,13 @@ data class UserProfile(
     val entityName: String,
     val sessionToken: String,
     val authMethod: AuthMethod,
+    /** True for the clearly-labelled hackathon demo session (no real identity proof). */
+    val isDemoAccount: Boolean = false,
+    /**
+     * Server-resolved registry facility id (`authorized_recyclers.recycler_id`)
+     * for a recycler. Never derived from a client-editable field.
+     */
+    val facilityId: String = "",
     val verifiedTimestamp: Long = System.currentTimeMillis()
 )
 

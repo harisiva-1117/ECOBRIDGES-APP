@@ -7,9 +7,15 @@ import com.example.auth.ProfileRow
 import com.example.data.CloudSyncManager
 import com.example.data.EwasteDatabase
 import com.example.data.EwasteRepository
+import com.example.data.PriceWriteResult
+import com.example.data.ReferencePriceInput
 import com.example.data.toEntity
 import com.example.data.toMaterialLot
 import com.example.model.MaterialLot
+import com.example.model.PendingPriceChange
+import com.example.model.PriceHistoryEntry
+import com.example.model.PriceRecord
+import com.example.model.RoleType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,7 +49,11 @@ data class AdminMetrics(
  * No number is fabricated: metrics not covered by the live admin view are
  * derived from the merged lot records above.
  */
-class AdminViewModel(application: Application) : AndroidViewModel(application) {
+class AdminViewModel(
+    application: Application,
+    private val adminActorId: String = "",
+    private val isDemoAccount: Boolean = false
+) : AndroidViewModel(application) {
 
     private val database = EwasteDatabase.getDatabase(application, viewModelScope)
     private val repository = EwasteRepository(
@@ -56,7 +66,10 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         database.collectorLocationDao(),
         database.connectionRequestDao(),
         database.quotationDao(),
-        database.auditLogDao()
+        database.auditLogDao(),
+        database.recyclerOfferDao(),
+        database.priceHistoryDao(),
+        database.priceChangeQueueDao()
     )
 
     private val _metrics = MutableStateFlow(AdminMetrics())
@@ -83,8 +96,140 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
+    // ---- Price management (government reference prices) ---------------------
+
+    /** Every reference price, including deactivated rows, for the admin list. */
+    private val _referencePrices = MutableStateFlow<List<PriceRecord>>(emptyList())
+    val referencePrices: StateFlow<List<PriceRecord>> = _referencePrices.asStateFlow()
+
+    private val _priceHistory = MutableStateFlow<List<PriceHistoryEntry>>(emptyList())
+    val priceHistory: StateFlow<List<PriceHistoryEntry>> = _priceHistory.asStateFlow()
+
+    private val _pendingPriceChanges = MutableStateFlow<List<PendingPriceChange>>(emptyList())
+    val pendingPriceChanges: StateFlow<List<PendingPriceChange>> = _pendingPriceChanges.asStateFlow()
+
+    /** Informational feedback for the price editor. */
+    private val _priceMessage = MutableStateFlow<String?>(null)
+    val priceMessage: StateFlow<String?> = _priceMessage.asStateFlow()
+
+    /** Set when the server rejected an edit because its version moved on. */
+    private val _priceConflict = MutableStateFlow<String?>(null)
+    val priceConflict: StateFlow<String?> = _priceConflict.asStateFlow()
+
+    private val _isSavingPrice = MutableStateFlow(false)
+    val isSavingPrice: StateFlow<Boolean> = _isSavingPrice.asStateFlow()
+
+    private val _isSyncingPrices = MutableStateFlow(false)
+    val isSyncingPrices: StateFlow<Boolean> = _isSyncingPrices.asStateFlow()
+
+    /** True when this is an offline demo session (edits stay on-device). */
+    val demoSession: Boolean get() = isDemoAccount
+
     init {
         refresh()
+        viewModelScope.launch {
+            repository.allReferencePrices.collect { _referencePrices.value = it }
+        }
+        viewModelScope.launch {
+            repository.priceHistory.collect { _priceHistory.value = it }
+        }
+        viewModelScope.launch {
+            repository.pendingPriceChanges.collect { _pendingPriceChanges.value = it }
+        }
+        refreshPriceManagement()
+    }
+
+    /** Pulls the authoritative price/offer tables and pushes queued edits. */
+    fun refreshPriceManagement() {
+        viewModelScope.launch {
+            _isSyncingPrices.value = true
+            try {
+                repository.refreshPriceCachesFromCloud()
+                val report = repository.syncPendingPriceChanges()
+                if (report.hasIssues) {
+                    _priceConflict.value = buildString {
+                        if (report.conflicts > 0) {
+                            append("${report.conflicts} queued change(s) conflict with a newer server value. ")
+                        }
+                        if (report.failed > 0) {
+                            append("${report.failed} queued change(s) could not be sent. ")
+                        }
+                        append("Nothing was overwritten.")
+                    }
+                }
+            } catch (e: Exception) {
+                _lastError.value = e.message
+            } finally {
+                _isSyncingPrices.value = false
+            }
+        }
+    }
+
+    /**
+     * Saves a reference price. The role is fixed here: only an authenticated
+     * government administrator reaches this screen, and the repository/DB
+     * enforce the same rule independently.
+     */
+    fun saveReferencePrice(input: ReferencePriceInput) {
+        viewModelScope.launch {
+            _isSavingPrice.value = true
+            _priceConflict.value = null
+            val result = repository.saveReferencePrice(
+                input = input,
+                actorRole = RoleType.GOVERNMENT_ADMIN,
+                actorUserId = adminActorId,
+                actorLabel = adminActorId.ifBlank { "Government admin" },
+                isDemoAccount = isDemoAccount
+            )
+            applyPriceResult(result)
+            _isSavingPrice.value = false
+        }
+    }
+
+    fun deactivateReferencePrice(priceId: String, baseVersion: Long) {
+        viewModelScope.launch {
+            _isSavingPrice.value = true
+            _priceConflict.value = null
+            val result = repository.deactivateReferencePrice(
+                priceId = priceId,
+                baseVersion = baseVersion,
+                actorRole = RoleType.GOVERNMENT_ADMIN,
+                actorUserId = adminActorId,
+                actorLabel = adminActorId.ifBlank { "Government admin" },
+                isDemoAccount = isDemoAccount
+            )
+            applyPriceResult(result)
+            _isSavingPrice.value = false
+        }
+    }
+
+    fun discardPriceChange(queueId: String) {
+        viewModelScope.launch {
+            repository.discardQueuedPriceChange(queueId)
+            _priceMessage.value = "Queued change discarded."
+        }
+    }
+
+    fun clearPriceFeedback() {
+        _priceMessage.value = null
+        _priceConflict.value = null
+    }
+
+    private fun applyPriceResult(result: PriceWriteResult) {
+        when (result) {
+            is PriceWriteResult.Saved -> {
+                _priceMessage.value = if (result.localOnly) {
+                    "Saved on this device only; it will sync through the backend when online."
+                } else {
+                    "Price saved. It is queued for the cloud if you are offline."
+                }
+            }
+            is PriceWriteResult.Rejected -> _priceMessage.value = result.errors.joinToString(" ")
+            is PriceWriteResult.Conflict -> {
+                _priceConflict.value = result.message
+                _priceMessage.value = null
+            }
+        }
     }
 
     fun refresh() {

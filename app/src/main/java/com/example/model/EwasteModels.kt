@@ -146,13 +146,18 @@ data class MaterialLot(
     val eprCertificateNo: String? = null,
     /** E-waste manifest completed by the receiving formal recycler. */
     val manifestDetails: String? = null,
+    /** Price actually agreed at handover; immutable once recorded. */
+    val agreedRatePerKg: Double? = null,
+    val agreedAt: Long? = null,
     val isSynced: Boolean = true
 )
 
 data class PriceRecord(
     val category: MaterialCategory,
+    /** Human-readable material name (DB `sub_category`). */
     val subCategory: String,
     val location: String,
+    /** Indicative reference buying rate, never an actual recycler offer. */
     val prevailingBuyRate: Double,
     val marketMin: Double,
     val marketMax: Double,
@@ -160,8 +165,21 @@ data class PriceRecord(
     val trendPercentage: Double,
     val unit: String = "₹/kg",
     val dateUpdated: String,
-    val keyMetals: List<String>
-)
+    val keyMetals: List<String>,
+    val priceId: String = "",
+    /** Condition / grade of the material (e.g. "stripped", "mixed"). */
+    val grade: String = "",
+    val currency: String = "INR",
+    val isActive: Boolean = true,
+    val effectiveDate: String? = null,
+    /** Epoch millis of the last server-side update. */
+    val updatedAt: Long = 0L,
+    val updatedBy: String = "",
+    val version: Long = 1L
+) {
+    /** Latest applied reference price per kilogram. */
+    val pricePerKg: Double get() = prevailingBuyRate
+}
 
 data class AuthorizedRecycler(
     val recyclerId: String,

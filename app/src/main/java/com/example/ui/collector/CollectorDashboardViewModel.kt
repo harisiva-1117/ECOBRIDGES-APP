@@ -29,6 +29,7 @@ import com.example.model.MaterialCategory
 import com.example.model.MaterialLot
 import com.example.model.PaymentMode
 import com.example.model.PriceRecord
+import com.example.model.RecyclerOffer
 import com.example.model.UnitEconomicsData
 import com.example.voice.VoiceEngine
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +54,13 @@ class CollectorDashboardViewModel(
 
     val lots: StateFlow<List<MaterialLot>>
     val prices: StateFlow<List<PriceRecord>>
+
+    /** Applicable (active) government reference prices — indicative only. */
+    val referencePrices: StateFlow<List<PriceRecord>>
+
+    /** Actual purchase offers published by authorised recyclers. */
+    val recyclerOffers: StateFlow<List<RecyclerOffer>>
+
     val recyclers: StateFlow<List<AuthorizedRecycler>>
     val totalSettledEarnings: StateFlow<Double>
     val pendingDues: StateFlow<Double>
@@ -96,7 +104,10 @@ class CollectorDashboardViewModel(
             database.collectorLocationDao(),
             database.connectionRequestDao(),
             database.quotationDao(),
-            database.auditLogDao()
+            database.auditLogDao(),
+            database.recyclerOfferDao(),
+            database.priceHistoryDao(),
+            database.priceChangeQueueDao()
         )
 
         val nowMillis = System.currentTimeMillis()
@@ -124,6 +135,18 @@ class CollectorDashboardViewModel(
         )
 
         prices = repository.allPrices.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            emptyList()
+        )
+
+        referencePrices = repository.activeReferencePrices.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            emptyList()
+        )
+
+        recyclerOffers = repository.activeRecyclerOffers.stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5000),
             emptyList()

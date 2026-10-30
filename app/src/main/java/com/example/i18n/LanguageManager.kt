@@ -445,16 +445,16 @@ object LanguageManager {
             Language.TAMIL -> "சான்றளிக்கப்பட்ட சேகரிப்பாளர் அணுகலுக்கு பதிவு செய்யப்பட்ட மொபைல் OTP, அதிகாரப்பூர்வ மின்னஞ்சல் அல்லது Google கணக்குடன் உள்நுழைக."
         }
         RoleType.FORMAL_RECYCLER -> when (lang) {
-            Language.ENGLISH -> "Statutory CPCB-authorized recycler portal. Sign in with registered mobile, enterprise email, or Google account."
-            Language.HINDI -> "वैधानिक सीपीसीबी-अधिकृत रीसायकलर पोर्टल। पंजीकृत मोबाइल, ईमेल या Google खाते से साइन इन करें।"
-            Language.MARATHI -> "वैधानिक सीपीसीबी-अधिकृत पुनर्प्रक्रिया पोर्टल. नोंदणीकृत मोबाईल, ईमेल किंवा Google खात्यासह साइन इन करा."
-            Language.TAMIL -> "CPCB-அங்கீகரிக்கப்பட்ட மறுசுழற்சியாளர் போர்டல். பதிவு செய்யப்பட்ட மொபைல், நிறுவன மின்னஞ்சல் அல்லது Google கணக்குடன் உள்நுழைக."
+            Language.ENGLISH -> "Recycler portal. Recycler authorization is granted only after administrator verification."
+            Language.HINDI -> "रीसायकलर पोर्टल। प्राधिकरण केवल प्रशासक द्वारा सत्यापन के बाद दिया जाता है।"
+            Language.MARATHI -> "पुनर्प्रक्रिया पोर्टल. प्राधिकरण केवळ प्रशासकाने पडताळणी केल्यानंतर दिले जाते."
+            Language.TAMIL -> "மறுசுழற்சியாளர் போர்டல். நிர்வாகி சரிபார்த்த பிறகு மட்டுமே அனுமதி வழங்கப்படும்."
         }
         RoleType.GOVERNMENT_ADMIN -> when (lang) {
-            Language.ENGLISH -> "CPCB / MoEFCC Official Administration Gateway. Authenticate via authorized mobile OTP, gov email, or Google account."
-            Language.HINDI -> "सीपीसीबी / पर्यावरण मंत्रालय आधिकारिक प्रशासन। अधिकृत मोबाइल ओटीपी, सरकारी ईमेल या Google खाते से प्रमाणित करें।"
-            Language.MARATHI -> "सीपीसीबी / पर्यावरण मंत्रालय अधिकृत प्रशासन. अधिकृत मोबाईल ओटीपी, सरकारी ईमेल किंवा Google खात्यासह प्रमाणित करा."
-            Language.TAMIL -> "CPCB / சுற்றுச்சூழல் அமைச்சகத்தின் அதிகாரப்பூர்வ நிர்வாக நுழைவாயில். அங்கீகரிக்கப்பட்ட மொபைல் OTP, அரசு மின்னஞ்சல் அல்லது Google கணக்கு மூலம் உறுதிப்படுத்தவும்."
+            Language.ENGLISH -> "Administrator sign-in. Access is limited to accounts provisioned by the platform operator."
+            Language.HINDI -> "प्रशासक साइन-इन। पहुँच केवल प्लेटफ़ॉर्म ऑपरेटर द्वारा दिए गए खातों तक सीमित है।"
+            Language.MARATHI -> "प्रशासक साइन-इन. प्रवेश केवळ प्लॅटफॉर्म ऑपरेटरने दिलेल्या खात्यांपुरता मर्यादित आहे."
+            Language.TAMIL -> "நிர்வாகி உள்நுழைவு. தள இயக்குநரால் வழங்கப்பட்ட கணக்குகளுக்கு மட்டும் அணுகல்."
         }
     }
 
@@ -473,10 +473,10 @@ object LanguageManager {
     }
 
     fun getOtpCardSubtitle(lang: Language): String = when (lang) {
-        Language.ENGLISH -> "Generate and receive secure OTP on your registered Mobile (+91 SMS), Email, and Google Account."
-        Language.HINDI -> "अपने पंजीकृत मोबाइल (+91 एसएमएस), ईमेल और गूगल खाते पर सुरक्षित ओटीपी प्राप्त करें।"
-        Language.MARATHI -> "तुमच्या नोंदणीकृत मोबाईल (+91 एसएमएस), ईमेल आणि गुगल खात्यावर सुरक्षित ओटीपी मिळवा."
-        Language.TAMIL -> "உங்கள் பதிவு செய்யப்பட்ட மொபைல் (+91 SMS), மின்னஞ்சல் மற்றும் Google கணக்கில் பாதுகாப்பான OTP ஐ உருவாக்கி பெறவும்."
+        Language.ENGLISH -> "Demo builds show the code on this device. Production requires a configured verification provider."
+        Language.HINDI -> "डेमो बिल्ड कोड इस डिवाइस पर दिखाते हैं। उत्पादन के लिए सत्यापन प्रदाता आवश्यक है।"
+        Language.MARATHI -> "डेमो बिल्ड कोड या डिव्हाइसवर दाखवतात. उत्पादनासाठी पडताळणी प्रदाता आवश्यक आहे."
+        Language.TAMIL -> "டெமோ பில்ட் குறியீட்டை இந்த சாதனத்தில் காட்டும். உற்பத்திக்கு சரிபார்ப்பு சேவை தேவை."
     }
 
     fun getSelectDestinationHeader(lang: Language): String = when (lang) {
@@ -494,10 +494,10 @@ object LanguageManager {
     }
 
     fun getAllChannelsSubtitle(lang: Language): String = when (lang) {
-        Language.ENGLISH -> "Simultaneously dispatch OTP across SMS, Email, and Google"
-        Language.HINDI -> "एसएमएस, ईमेल और गूगल पर एक साथ ओटीपी भेजें"
-        Language.MARATHI -> "एसएमएस, ईमेल आणि गुगलवर एकाच वेळी ओटीपी पाठवा"
-        Language.TAMIL -> "SMS, மின்னஞ்சல் மற்றும் Google மூலம் ஒரே நேரத்தில் OTP அனுப்பவும்"
+        Language.ENGLISH -> "Demo mode records the code locally; nothing is dispatched"
+        Language.HINDI -> "डेमो मोड कोड स्थानीय रूप से रिकॉर्ड करता है; कुछ भी नहीं भेजा जाता"
+        Language.MARATHI -> "डेमो मोड कोड स्थानिकरित्या नोंदवतो; काहीही पाठवले जात नाही"
+        Language.TAMIL -> "டெமோ பயன்முறை குறியீட்டை உள்ளூரில் பதிவு செய்கிறது; எதுவும் அனுப்பப்படாது"
     }
 
     fun getMobileSmsTitle(lang: Language): String = when (lang) {
@@ -508,10 +508,10 @@ object LanguageManager {
     }
 
     fun getMobileSmsSubtitle(lang: Language): String = when (lang) {
-        Language.ENGLISH -> "Instant SMS dispatch via Govt. Telecom Gateway"
-        Language.HINDI -> "सरकारी टेलीकॉम गेटवे के माध्यम से त्वरित एसएमएस"
-        Language.MARATHI -> "सरकारी टेलिकॉम गेटवेद्वारे त्वरित एसएमएस"
-        Language.TAMIL -> "அரசு தொலைத்தொடர்பு நுழைவாயில் மூலம் உடனடி SMS"
+        Language.ENGLISH -> "Local demo code only — no SMS is sent by this build"
+        Language.HINDI -> "केवल स्थानीय डेमो कोड — यह बिल्ड कोई एसएमएस नहीं भेजता"
+        Language.MARATHI -> "फक्त स्थानिक डेमो कोड — हे बिल्ड एसएमएस पाठवत नाही"
+        Language.TAMIL -> "உள்ளூர் டெமோ குறியீடு மட்டும் — இந்த பில்ட் SMS அனுப்பாது"
     }
 
     fun getRegisteredEmailTitle(lang: Language): String = when (lang) {
