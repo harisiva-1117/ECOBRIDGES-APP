@@ -235,6 +235,13 @@ object PortalLabels {
         Language.TAMIL -> "சிபிசிபி சான்றளிக்கப்பட்டது"
     }
 
+    fun getDemoFacilityNotVerified(lang: Language): String = when (lang) {
+        Language.ENGLISH -> "Demo facility — not CPCB verified"
+        Language.HINDI -> "डेमो सुविधा — सीपीसीबी सत्यापित नहीं"
+        Language.MARATHI -> "डेमो सुविधा — सीपीसीबी प्रमाणित नाही"
+        Language.TAMIL -> "டெமோ வசதி — சிபிசிபி சரிபார்க்கப்படவில்லை"
+    }
+
     fun getDashboardTab(lang: Language): String = when (lang) {
         Language.ENGLISH -> "Dashboard"
         Language.HINDI -> "डैशबोर्ड"
@@ -432,10 +439,10 @@ object PortalLabels {
     }
 
     fun getEprCertificateIssued(lang: Language, certNo: String): String = when (lang) {
-        Language.ENGLISH -> "EPR Traceability Certificate Issued ($certNo)"
-        Language.HINDI -> "ईपीआर ट्रेसेबिलिटी प्रमाणपत्र जारी ($certNo)"
-        Language.MARATHI -> "ईपीआर ट्रेसेबिलिटी प्रमाणपत्र जारी ($certNo)"
-        Language.TAMIL -> "ஈபிஆர் கண்காணிப்பு சான்றிதழ் வழங்கப்பட்டது ($certNo)"
+        Language.ENGLISH -> "Local handover reference recorded ($certNo)"
+        Language.HINDI -> "स्थानीय हैंडओवर संदर्भ दर्ज ($certNo)"
+        Language.MARATHI -> "स्थानिक हँडओव्हर संदर्भ नोंदवला ($certNo)"
+        Language.TAMIL -> "உள்ளூர் ஒப்படைப்பு குறிப்பு பதிவு செய்யப்பட்டது ($certNo)"
     }
 
     fun getInboundSummary(lang: Language, pending: Int, total: Int): String = when (lang) {
@@ -593,17 +600,17 @@ object PortalLabels {
     }
 
     fun getNoEprCertificatesYet(lang: Language): String = when (lang) {
-        Language.ENGLISH -> "No EPR traceability certificates issued yet. Complete a weigh-in to generate the first certificate."
-        Language.HINDI -> "अभी तक कोई ईपीआर ट्रेसेबिलिटी प्रमाणपत्र जारी नहीं किया गया। पहला प्रमाणपत्र बनाने के लिए वजन तोलन पूर्ण करें।"
-        Language.MARATHI -> "अजून कोणतेही ईपीआर ट्रेसेबिलिटी प्रमाणपत्र जारी केलेले नाही. पहिले प्रमाणपत्र तयार करण्यासाठी वजन पडताळणी पूर्ण करा."
-        Language.TAMIL -> "இன்னும் ஈபிஆர் கண்காணிப்பு சான்றிதழ்கள் வழங்கப்படவில்லை. முதல் சான்றிதழை உருவாக்க எடை கணக்கீட்டை முடிக்கவும்."
+        Language.ENGLISH -> "No local handover records yet. Complete a weigh-in to create the first local record."
+        Language.HINDI -> "अभी तक कोई स्थानीय हैंडओवर रिकॉर्ड नहीं। पहला स्थानीय रिकॉर्ड बनाने के लिए वजन तोलन पूर्ण करें।"
+        Language.MARATHI -> "अजून कोणतीही स्थानिक हँडओव्हर नोंद नाही. पहिली स्थानिक नोंद तयार करण्यासाठी वजन पडताळणी पूर्ण करा."
+        Language.TAMIL -> "இன்னும் உள்ளூர் ஒப்படைப்பு பதிவுகள் இல்லை. முதல் உள்ளூர் பதிவை உருவாக்க எடை கணக்கீட்டை முடிக்கவும்."
     }
 
     fun getEprCertificateLabel(lang: Language, certNo: String): String = when (lang) {
-        Language.ENGLISH -> "EPR Traceability Certificate ($certNo)"
-        Language.HINDI -> "ईपीआर ट्रेसेबिलिटी प्रमाणपत्र ($certNo)"
-        Language.MARATHI -> "ईपीआर ट्रेसेबिलिटी प्रमाणपत्र ($certNo)"
-        Language.TAMIL -> "ஈபிஆர் கண்காணிப்பு சான்றிதழ் ($certNo)"
+        Language.ENGLISH -> "Local handover reference ($certNo)"
+        Language.HINDI -> "स्थानीय हैंडओवर संदर्भ ($certNo)"
+        Language.MARATHI -> "स्थानिक हँडओव्हर संदर्भ ($certNo)"
+        Language.TAMIL -> "உள்ளூர் ஒப்படைப்பு குறிப்பு ($certNo)"
     }
 
     fun getFacilityNameLabel(lang: Language): String = when (lang) {

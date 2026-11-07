@@ -157,7 +157,11 @@ fun FormalRecyclerPortalScreen(
                             color = EcoTextPrimary
                         )
                         Text(
-                            text = PortalLabels.getCpcbAuthenticated(language),
+                            text = if (viewModel.demoSession) {
+                                PortalLabels.getDemoFacilityNotVerified(language)
+                            } else {
+                                PortalLabels.getCpcbAuthenticated(language)
+                            },
                             fontSize = 11.sp,
                             color = EcoTextSecondary
                         )
@@ -607,7 +611,7 @@ fun FormalRecyclerPortalScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(text = PortalLabels.getEprCertificateIssued(language, lot.eprCertificateNo ?: "CPCB-EPR"), fontSize = 11.sp, color = SuccessGreen, fontWeight = FontWeight.SemiBold)
+                                Text(text = PortalLabels.getEprCertificateIssued(language, com.example.util.HandoverRef.display(lot.eprCertificateNo) ?: "pending"), fontSize = 11.sp, color = SuccessGreen, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -1140,7 +1144,7 @@ private fun RecyclerReportsTab(
                     ) {
                         Column {
                             Text(text = lot.lotId, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = EcoGreenPrimary)
-                            Text(text = PortalLabels.getEprCertificateLabel(language, lot.eprCertificateNo ?: "CPCB-EPR"), fontSize = 11.sp, color = TextSecondaryMuted)
+                            Text(text = PortalLabels.getEprCertificateLabel(language, com.example.util.HandoverRef.display(lot.eprCertificateNo) ?: "pending"), fontSize = 11.sp, color = TextSecondaryMuted)
                         }
                         Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(18.dp))
                     }

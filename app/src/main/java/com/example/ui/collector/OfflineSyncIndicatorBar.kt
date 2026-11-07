@@ -92,7 +92,8 @@ fun OfflineSyncIndicatorBar(
     )
 
     val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    val lastSyncStr = timeFormat.format(Date(lastSyncTimestamp))
+    val hasSynced = lastSyncTimestamp > 0L
+    val lastSyncStr = if (hasSynced) timeFormat.format(Date(lastSyncTimestamp)) else "never"
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -184,7 +185,7 @@ fun OfflineSyncIndicatorBar(
                                     }
                                 } else {
                                     when (language) {
-                                        Language.ENGLISH -> "CPCB Database Synced"
+                                        Language.ENGLISH -> "Cloud Sync Up to Date"
                                         Language.HINDI -> "डेटाबेस पूर्ण सिंक है"
                                         Language.MARATHI -> "डेटाबेस पूर्ण सिंक आहे"
                                         Language.TAMIL -> "CPCB தரவுத்தளம் ஒத்திசைக்கப்பட்டது"
@@ -222,7 +223,11 @@ fun OfflineSyncIndicatorBar(
                                 }
                             } else {
                                 when (language) {
-                                    Language.ENGLISH -> "Last synced at $lastSyncStr • Offline-First active"
+                                    Language.ENGLISH -> if (hasSynced) {
+                                        "Last successful sync: $lastSyncStr • Offline-First active"
+                                    } else {
+                                        "Not synced yet • Offline-First active"
+                                    }
                                     Language.HINDI -> "अंतिम सिंक समय: $lastSyncStr • ऑफलाइन-फर्स्ट तैयार"
                                     Language.MARATHI -> "शेवटचे सिंक: $lastSyncStr • ऑफलाइन-फर्स्ट सक्रिय"
                                     Language.TAMIL -> "கடைசி ஒத்திசைவு: $lastSyncStr • ஆஃப்லைன்-முதல் செயலில்"

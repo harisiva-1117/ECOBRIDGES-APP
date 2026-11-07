@@ -43,6 +43,9 @@ class RecyclerViewModel(
         const val TAG = "RecyclerViewModel"
     }
 
+    /** True when this session is a clearly-labelled demo account (no CPCB authorization). */
+    val demoSession: Boolean get() = isDemoAccount
+
     private val _lots = MutableStateFlow<List<MaterialLot>>(emptyList())
     val lots: StateFlow<List<MaterialLot>> = _lots.asStateFlow()
 
@@ -234,8 +237,8 @@ class RecyclerViewModel(
                 addLine("Weight: ${lot.weightKg} kg")
                 addLine("Rate: Rs.${lot.quotedRatePerKg.toInt()}/kg")
                 addLine("Total: Rs.${lot.estimatedValueInr.toInt()}")
-                addLine("EPR Certificate: ${lot.eprCertificateNo ?: "Pending"}")
-                addLine("Recycler: ${lot.matchedRecyclerName ?: "EcoReclaim Green Refineries"}")
+                addLine("Local Handover Ref: ${com.example.util.HandoverRef.display(lot.eprCertificateNo) ?: "Pending"}")
+                addLine("Recycler: ${lot.matchedRecyclerName ?: "Recycler not assigned"}")
                 addLine("Date: ${android.text.format.DateFormat.format("dd-MM-yyyy", System.currentTimeMillis())}")
                 pdfWriter.finishPage(page)
                 pdfWriter.writeTo(FileOutputStream(file))

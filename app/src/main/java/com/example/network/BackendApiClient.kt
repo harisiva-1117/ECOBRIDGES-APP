@@ -1,6 +1,7 @@
 package com.example.network
 
 import android.util.Log
+import com.example.BuildConfig
 import com.example.data.OfferInput
 import com.example.data.ReferencePriceInput
 import com.example.model.MaterialCategory
@@ -58,8 +59,14 @@ sealed class BackendPriceResult {
 object BackendApiClient {
     private const val TAG = "BackendApiClient"
 
-    // Default to Android Emulator loopback alias (10.0.2.2). Overridable at runtime.
-    private var nestJsBaseUrl: String = "http://10.0.2.2:3000"
+    /**
+     * Resolved from `NESTJS_BASE_URL` (see app/build.gradle.kts). Debug builds
+     * fall back to the emulator loopback alias; release builds must be
+     * configured at build time. Still overridable at runtime for diagnostics.
+     */
+    private var nestJsBaseUrl: String = BuildConfig.NESTJS_BASE_URL.removeSuffix("/")
+
+    private fun resolvedBaseUrl(): String? = nestJsBaseUrl.takeIf { it.isNotBlank() }
 
     private var tokenProvider: (() -> String?)? = null
 
@@ -86,8 +93,15 @@ object BackendApiClient {
         otp: String,
         role: RoleType?
     ): BackendDemoLoginResult = withContext(Dispatchers.IO) {
+        val base = resolvedBaseUrl()
+            ?: return@withContext BackendDemoLoginResult(
+                success = false,
+                accessToken = null,
+                user = null,
+                errorMessage = "Backend endpoint is not configured for this build."
+            )
         try {
-            val url = URL("$nestJsBaseUrl/api/auth/demo-login")
+            val url = URL("$base/api/auth/demo-login")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
@@ -177,8 +191,12 @@ object BackendApiClient {
         input: OfferInput,
         token: String? = null
     ): BackendOfferResult = withContext(Dispatchers.IO) {
+        val base = resolvedBaseUrl()
+            ?: return@withContext BackendOfferResult.Failed(
+                "Backend endpoint is not configured for this build."
+            )
         try {
-            val url = URL("$nestJsBaseUrl/api/prices/offers")
+            val url = URL("$base/api/prices/offers")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
@@ -272,13 +290,14 @@ object BackendApiClient {
         category: String? = null,
         recyclerId: String? = null
     ): List<RecyclerOffer> = withContext(Dispatchers.IO) {
+        val base = resolvedBaseUrl() ?: return@withContext emptyList()
         try {
             val params = mutableListOf<String>()
             category?.let { params.add("category=$it") }
             recyclerId?.let { params.add("recyclerId=$it") }
             val queryStr = if (params.isNotEmpty()) "?" + params.joinToString("&") else ""
 
-            val url = URL("$nestJsBaseUrl/api/prices/offers$queryStr")
+            val url = URL("$base/api/prices/offers$queryStr")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
@@ -336,8 +355,12 @@ object BackendApiClient {
         input: ReferencePriceInput,
         token: String? = null
     ): BackendPriceResult = withContext(Dispatchers.IO) {
+        val base = resolvedBaseUrl()
+            ?: return@withContext BackendPriceResult.Failed(
+                "Backend endpoint is not configured for this build."
+            )
         try {
-            val url = URL("$nestJsBaseUrl/api/prices/reference")
+            val url = URL("$base/api/prices/reference")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
@@ -429,9 +452,10 @@ object BackendApiClient {
         token: String? = null,
         category: String? = null
     ): List<PriceRecord> = withContext(Dispatchers.IO) {
+        val base = resolvedBaseUrl() ?: return@withContext emptyList()
         try {
             val queryStr = category?.let { "?category=$it" } ?: ""
-            val url = URL("$nestJsBaseUrl/api/prices/reference$queryStr")
+            val url = URL("$base/api/prices/reference$queryStr")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")

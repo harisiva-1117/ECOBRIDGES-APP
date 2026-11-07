@@ -1,6 +1,7 @@
 package com.example.network
 
 import android.util.Log
+import com.example.BuildConfig
 import com.example.model.Language
 import com.example.model.RoleType
 import com.example.model.SemanticAnalysisResult
@@ -21,9 +22,13 @@ import java.net.URL
 object BackendVoiceClient {
     private const val TAG = "BackendVoiceClient"
 
-    // Default development host addresses (10.0.2.2 is Android Emulator's alias to host loopback)
-    private var nestJsBaseUrl: String = "http://10.0.2.2:3000"
-    private var fastApiBaseUrl: String = "http://10.0.2.2:8000"
+    /**
+     * Resolved from `NESTJS_BASE_URL` / `FASTAPI_BASE_URL` (see
+     * app/build.gradle.kts). A blank FastAPI URL means the voice service is not
+     * deployed; callers fall back to the on-device router.
+     */
+    private var nestJsBaseUrl: String = BuildConfig.NESTJS_BASE_URL.removeSuffix("/")
+    private var fastApiBaseUrl: String = BuildConfig.FASTAPI_BASE_URL.removeSuffix("/")
 
     /**
      * Supplies the current Supabase access token. The NestJS voice endpoint
@@ -56,8 +61,9 @@ object BackendVoiceClient {
         currentRole: RoleType?,
         language: Language
     ): SemanticAnalysisResult? = withContext(Dispatchers.IO) {
+        val base = nestJsBaseUrl.takeIf { it.isNotBlank() } ?: return@withContext null
         try {
-            val url = URL("$nestJsBaseUrl/api/voice/intent")
+            val url = URL("$base/api/voice/intent")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
@@ -134,8 +140,9 @@ object BackendVoiceClient {
         currentRole: RoleType?,
         language: Language
     ): SemanticAnalysisResult? = withContext(Dispatchers.IO) {
+        val base = fastApiBaseUrl.takeIf { it.isNotBlank() } ?: return@withContext null
         try {
-            val url = URL("$fastApiBaseUrl/api/v1/voice/semantic-intent")
+            val url = URL("$base/api/v1/voice/semantic-intent")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")

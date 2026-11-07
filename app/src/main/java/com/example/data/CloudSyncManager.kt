@@ -717,6 +717,25 @@ object CloudSyncManager {
         }
     }
 
+    /** True only when a real Supabase round-trip succeeds.
+     *
+     * The regular fetch helpers swallow failures and return empty lists, so
+     * they cannot be used to decide whether the device is actually synced.
+     * This probe throws on failure so callers can gate "Last synced" labels.
+     */
+    suspend fun isCloudReachable(): Boolean {
+        if (!SupabaseAuthConfig.isConfigured()) return false
+        return try {
+            SupabaseAuthConfig.client.from("material_prices")
+                .select { limit(1) }
+                .decodeList<PriceDto>()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Cloud reachability probe failed: ${e.message}")
+            false
+        }
+    }
+
     /** Upsert a single lot (collector creation or recycler lifecycle update). */
     suspend fun upsertLot(lot: CollectorLotDto): Boolean {
         if (!SupabaseAuthConfig.isConfigured()) return false

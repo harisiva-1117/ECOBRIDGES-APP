@@ -1,8 +1,11 @@
 package com.example.ui.collector
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -69,13 +72,16 @@ class CollectorDashboardViewModel(
     val safetyGuidance: StateFlow<List<HazardSafetyInfo>>
     val unitEconomics: List<UnitEconomicsData>
 
-    private val _isOfflineMode = MutableStateFlow(false)
+    // Reflect the device's real connectivity at launch instead of assuming
+    // online. Users can still override this with the manual offline toggle.
+    private val _isOfflineMode = MutableStateFlow(!hasNetworkConnection())
     val isOfflineMode: StateFlow<Boolean> = _isOfflineMode.asStateFlow()
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
 
-    private val _lastSyncTimestamp = MutableStateFlow(System.currentTimeMillis())
+    // 0 means "not synced yet" until a cloud push has actually succeeded.
+    private val _lastSyncTimestamp = MutableStateFlow(0L)
     val lastSyncTimestamp: StateFlow<Long> = _lastSyncTimestamp.asStateFlow()
 
     val unsyncedCount: StateFlow<Int>
@@ -202,7 +208,7 @@ class CollectorDashboardViewModel(
         unitEconomics = repository.getUnitEconomics()
 
         // Pull the shared Supabase source of truth into the local cache.
-        refreshFromCloud()
+        refreshFromCloud(updateSyncTimestamp = true)
     }
 
     /**
@@ -212,7 +218,7 @@ class CollectorDashboardViewModel(
      * mirrors them into the local Room cache. Every dashboard flow reads Room,
      * so a change made by the recycler surfaces here after a pull.
      */
-    fun refreshFromCloud() {
+    fun refreshFromCloud(updateSyncTimestamp: Boolean = false) {
         viewModelScope.launch {
             val database = EwasteDatabase.getDatabase(getApplication(), viewModelScope)
 
@@ -264,7 +270,12 @@ class CollectorDashboardViewModel(
                     }
                 }
             }
-            _lastSyncTimestamp.value = System.currentTimeMillis()
+            // The fetch helpers above swallow errors and return empty lists, so
+            // a completed runCatching block is NOT proof of a successful sync.
+            // Advance "Last synced" only after a real round-trip probe succeeds.
+            if (updateSyncTimestamp && CloudSyncManager.isCloudReachable()) {
+                _lastSyncTimestamp.value = System.currentTimeMillis()
+            }
         }
     }
 
@@ -317,11 +328,18 @@ class CollectorDashboardViewModel(
                 // Push the new record to the shared Supabase source of truth so the
                 // formal recycler and government admin observe the same row. Offline
                 // creates stay local with isSynced=false until connectivity returns.
+                var pushed = false
                 if (!_isOfflineMode.value) {
                     val uid = currentUserId()
                     if (uid.isNotBlank()) {
-                        runCatching { CloudSyncManager.upsertLot(newLot.toCollectorLotDto(uid)) }
-                            .onFailure { Log.w(TAG, "Cloud push deferred (offline/error): ${it.message}") }
+                        pushed = runCatching {
+                            CloudSyncManager.upsertLot(newLot.toCollectorLotDto(uid))
+                        }.getOrElse {
+                            Log.w(TAG, "Cloud push deferred (offline/error): ${it.message}")
+                            false
+                        }
+                        // Only flip the badge to "Synced" after the server accepted it.
+                        if (pushed) repository.markLotSynced(newLot.lotId)
                     }
                 }
                 endCreationSession()
@@ -329,7 +347,7 @@ class CollectorDashboardViewModel(
                     action = "LOT_CREATED",
                     detailJson = "{\"lotId\":\"${newLot.lotId}\",\"category\":\"${category.name}\",\"weightKg\":$weightKg}"
                 )
-                onCreated(newLot)
+                onCreated(if (pushed) newLot.copy(isSynced = true) else newLot)
             } catch (e: Exception) {
                 Log.e(TAG, "Lot creation failed", e)
                 _createError.value = "Could not create lot: ${e.message ?: "unexpected error"}. Your draft is kept."
@@ -393,7 +411,10 @@ class CollectorDashboardViewModel(
                 if (outcome.lotsPushed > 0 || outcome.transactionsPushed > 0) {
                     Log.i(TAG, "Cloud sync pushed ${outcome.lotsPushed} lots, ${outcome.transactionsPushed} transactions")
                 }
-                _lastSyncTimestamp.value = System.currentTimeMillis()
+                // Timestamp only advances on a real successful round-trip.
+                if (outcome.serverReachable) {
+                    _lastSyncTimestamp.value = System.currentTimeMillis()
+                }
                 // Re-read the shared source of truth so recycler-side changes to
                 // this collector's records surface (real-time refetch sync).
                 refreshFromCloud()
@@ -671,6 +692,18 @@ class CollectorDashboardViewModel(
     private fun currentUserId(): String =
         com.example.auth.SupabaseAuthService.getInstance(getApplication())
             .authenticatedUser.value?.userId ?: ""
+
+    /** True only when the OS reports a validated internet connection. */
+    private fun hasNetworkConnection(): Boolean = try {
+        val cm = getApplication<Application>()
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    } catch (_: Exception) {
+        false
+    }
 
     private fun startOfDayMillis(millis: Long): Long {
         val cal = Calendar.getInstance().apply { timeInMillis = millis }

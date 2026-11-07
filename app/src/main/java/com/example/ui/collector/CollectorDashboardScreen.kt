@@ -145,6 +145,7 @@ fun CollectorDashboardScreen(
     viewModel: CollectorDashboardViewModel,
     collectorPhone: String,
     language: Language,
+    isDemoAccount: Boolean = false,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -463,8 +464,8 @@ fun CollectorDashboardScreen(
                                     text = {
                                         Text(
                                             text = if (unsyncedCount > 0)
-                                                "$unsyncedCount changes queued for CPCB sync"
-                                            else "All records synced with CPCB",
+                                                "$unsyncedCount changes queued for sync"
+                                            else "No pending changes",
                                             fontSize = 13.sp
                                         )
                                     },
@@ -648,6 +649,7 @@ fun CollectorDashboardScreen(
                 6 -> CollectorProfileTab(
                     collectorPhone = collectorPhone,
                     collectorLocation = collectorLocation,
+                    isDemoAccount = isDemoAccount,
                     isOffline = isOffline,
                     isSyncing = isSyncing,
                     unsyncedCount = unsyncedCount,
@@ -863,7 +865,7 @@ fun HomeTab(
                         modifier = Modifier.weight(1f),
                         label = "Total Cash Settled",
                         value = "₹${totalSettled.toInt()}",
-                        subtitle = "Verified CPCB payout",
+                        subtitle = "Settled payout",
                         bgColor = EcoGreenDeep,
                         valueColor = Color.White,
                         labelColor = Color.White.copy(alpha = 0.8f),
@@ -1270,10 +1272,10 @@ fun HomeTab(
                             Column {
                                 Text(
                                     text = when {
-                                        isSyncing -> "CPCB Database Syncing..."
-                                        isOffline -> "CPCB Database Offline"
-                                        unsyncedCount > 0 -> "CPCB Database Pending Sync"
-                                        else -> "CPCB Database Synced"
+                                        isSyncing -> "Cloud Sync In Progress..."
+                                        isOffline -> "Offline Mode"
+                                        unsyncedCount > 0 -> "Cloud Sync Pending"
+                                        else -> "Cloud Sync Up to Date"
                                     },
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
@@ -1335,7 +1337,7 @@ fun HomeTab(
                         Text(
                             text = if (isOffline) "Records stored locally"
                             else if (unsyncedCount > 0) "$unsyncedCount changes queued"
-                            else "All records synced",
+                            else "No pending changes",
                             fontSize = 10.sp,
                             color = EcoTextSecondary
                         )
@@ -2058,6 +2060,7 @@ fun MyLotsTab(
 fun CollectorProfileTab(
     collectorPhone: String,
     collectorLocation: CollectorLocationEntity?,
+    isDemoAccount: Boolean = false,
     isOffline: Boolean,
     isSyncing: Boolean,
     unsyncedCount: Int,
@@ -2124,14 +2127,18 @@ fun CollectorProfileTab(
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.Verified,
+                                imageVector = if (isDemoAccount) Icons.Default.Warning else Icons.Default.Verified,
                                 contentDescription = null,
-                                tint = EcoGreenBright,
+                                tint = if (isDemoAccount) WarningAmber else EcoGreenBright,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "CPCB Verified Collector",
+                                text = if (isDemoAccount) {
+                                    "Demo Collector — not CPCB verified"
+                                } else {
+                                    "Registered Collector"
+                                },
                                 color = Color.White.copy(alpha = 0.9f),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -2202,9 +2209,9 @@ fun CollectorProfileTab(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = if (isOffline) "Switch Online to sync"
-                                else if (isSyncing) "Syncing with CPCB..."
+                                else if (isSyncing) "Syncing..."
                                 else if (unsyncedCount > 0) "$unsyncedCount changes queued — tap to sync"
-                                else "All records synced with CPCB",
+                                else "No pending changes",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = EcoGreenPrimary
@@ -2598,7 +2605,7 @@ fun LotsOverviewTab(
                             fontSize = 22.sp
                         )
                         Text(
-                            text = "Verified CPCB Payout",
+                            text = "Settled Payout",
                             color = EmeraldAccent,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
@@ -2897,7 +2904,7 @@ fun LotItemCard(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = lot.matchedRecyclerName ?: "EcoReclaim Green Refineries",
+                        text = lot.matchedRecyclerName ?: "Recycler not assigned",
                         fontSize = 11.sp,
                         color = TextSecondaryMuted
                     )

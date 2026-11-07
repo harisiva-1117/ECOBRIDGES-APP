@@ -543,6 +543,7 @@ fun UnifiedRoleAuthScreen(
                     viewModel = collectorVm,
                     collectorPhone = user.phoneNumber ?: user.statutoryIdentifier,
                     language = language,
+                    isDemoAccount = user.isDemoAccount,
                     onBack = {
                         authService.signOut()
                         onBack()

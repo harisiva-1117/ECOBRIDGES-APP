@@ -106,13 +106,13 @@ fun HandoverDetailDialog(
                 ) {
                     Column {
                         Text(
-                            text = "Verifiable Handover Record",
+                            text = "Local handover record",
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
                             color = ForestGreenPrimary
                         )
                         Text(
-                            text = "MoEFCC EPR Traceability System",
+                            text = "Not a government-issued certificate",
                             fontSize = 11.sp,
                             color = TextSecondaryMuted
                         )
@@ -161,6 +161,12 @@ fun HandoverDetailDialog(
                             Text("Form-6 E-Waste Manifest", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = ForestGreenPrimary)
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(manifest, fontSize = 12.sp, color = TextPrimaryDark)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                "As recorded in-app. Statutory filing is completed on the CPCB portal.",
+                                fontSize = 10.sp,
+                                color = TextSecondaryMuted
+                            )
                         }
                     }
                 }
@@ -185,7 +191,7 @@ fun HandoverDetailDialog(
                                 .append("|RX|").append(lot.quotedRatePerKg)
                                 .append("|VAL|").append(lot.estimatedValueInr)
                                 .append("|SET|").append(lot.recyclerConfirmed)
-                            lot.eprCertificateNo?.let { append("|CERT|").append(it) }
+                            lot.eprCertificateNo?.let { append("|CERT|").append(com.example.util.HandoverRef.display(it)) }
                         }
                         val qrBitmap = remember(qrContent) { generateQrBitmap(qrContent, 440) }
 
@@ -251,7 +257,7 @@ fun HandoverDetailDialog(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (lot.recyclerConfirmed) "Recycler Confirmed & Compliant" else "Pending Weigh-In at Hub",
+                                    text = if (lot.recyclerConfirmed) "Recycler Confirmed" else "Pending Weigh-In at Hub",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (lot.recyclerConfirmed) SuccessGreen else ForestGreenDark
@@ -346,7 +352,7 @@ fun HandoverDetailDialog(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = lot.matchedRecyclerName ?: "EcoReclaim Green Refineries",
+                                text = lot.matchedRecyclerName ?: "Recycler not assigned",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 color = ForestGreenPrimary
@@ -362,7 +368,11 @@ fun HandoverDetailDialog(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "${lot.collectionLocation} (${lot.gpsCoordinates})",
+                                text = buildString {
+                                    append(lot.collectionLocation)
+                                    val gps = lot.gpsCoordinates.trim()
+                                    if (gps.isNotEmpty()) append(" (").append(gps).append(")")
+                                },
                                 fontSize = 11.sp,
                                 color = TextSecondaryMuted
                             )
@@ -376,10 +386,15 @@ fun HandoverDetailDialog(
 
                         if (lot.eprCertificateNo != null) {
                             Text(
-                                text = "MoEFCC EPR Certificate: ${lot.eprCertificateNo}",
+                                text = "Local handover ref: ${com.example.util.HandoverRef.display(lot.eprCertificateNo)}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = SuccessGreen
+                            )
+                            Text(
+                                text = "Not a government-issued EPR certificate",
+                                fontSize = 10.sp,
+                                color = TextSecondaryMuted
                             )
                         }
                     }

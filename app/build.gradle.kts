@@ -45,6 +45,24 @@ fun configFlag(key: String, default: Boolean): Boolean =
     else -> default
   }
 
+/** Emulator loopback aliases; debug builds only. */
+val devNestJsBaseUrl = "http://10.0.2.2:3000"
+val devFastApiBaseUrl = "http://10.0.2.2:8000"
+
+/**
+ * Backend endpoint resolution.
+ *
+ * `NESTJS_BASE_URL` / `FASTAPI_BASE_URL` are read from the local `.env` when
+ * present, so a physical device can be pointed at the deployed backend without
+ * editing source. Debug builds fall back to the emulator loopback alias;
+ * release builds have no fallback and surface the missing configuration instead
+ * of silently calling a developer machine.
+ */
+fun endpoint(key: String, devDefault: String): String {
+  val configured = localEnvValue(key)?.trim()?.removeSuffix("/")
+  return if (configured.isNullOrEmpty()) devDefault else configured
+}
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -117,6 +135,11 @@ android {
       buildConfigField("boolean", "DEMO_LOGIN_ENABLED", configFlag("DEMO_LOGIN_ENABLED", false).toString())
       buildConfigField("boolean", "DEMO_LOGIN_ALLOW_RELEASE", configFlag("DEMO_LOGIN_ALLOW_RELEASE", false).toString())
       buildConfigField("boolean", "DEMO_ENABLE_ADMIN", configFlag("DEMO_ENABLE_ADMIN", false).toString())
+
+      // Production endpoints come from `.env` / CI secrets at build time. No
+      // developer-machine address is ever baked into a release artifact.
+      buildConfigField("String", "NESTJS_BASE_URL", "\"${endpoint("NESTJS_BASE_URL", "")}\"")
+      buildConfigField("String", "FASTAPI_BASE_URL", "\"${endpoint("FASTAPI_BASE_URL", "")}\"")
     }
     debug {
       // Local hackathon builds are demo-enabled by default. This flag only
@@ -124,6 +147,11 @@ android {
       buildConfigField("boolean", "DEMO_LOGIN_ENABLED", configFlag("DEMO_LOGIN_ENABLED", true).toString())
       buildConfigField("boolean", "DEMO_LOGIN_ALLOW_RELEASE", "false")
       buildConfigField("boolean", "DEMO_ENABLE_ADMIN", configFlag("DEMO_ENABLE_ADMIN", true).toString())
+
+      // `.env` overrides the emulator defaults so the same build can be
+      // installed on a physical phone and talk to the deployed backend.
+      buildConfigField("String", "NESTJS_BASE_URL", "\"${endpoint("NESTJS_BASE_URL", devNestJsBaseUrl)}\"")
+      buildConfigField("String", "FASTAPI_BASE_URL", "\"${endpoint("FASTAPI_BASE_URL", devFastApiBaseUrl)}\"")
     }
   }
   compileOptions {
@@ -162,6 +190,9 @@ secrets {
   ignoreList.add("DEMO_OTP_CODE")
   ignoreList.add("DEMO_ENABLE_ADMIN")
   ignoreList.add("DEMO_ACCOUNTS")
+  // Backend endpoints are emitted with their real types above.
+  ignoreList.add("NESTJS_BASE_URL")
+  ignoreList.add("FASTAPI_BASE_URL")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }

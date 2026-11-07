@@ -805,6 +805,11 @@ class EwasteRepository(
         return count
     }
 
+    /** Called only after a confirmed cloud upsert for this specific lot. */
+    suspend fun markLotSynced(lotId: String) {
+        lotDao.markLotSynced(lotId)
+    }
+
     // ---- Point reads (shared by recycler/admin portals) -----------------------
     suspend fun lotById(lotId: String): MaterialLot? = lotDao.getLotById(lotId)?.toDomainModel()
 
@@ -851,7 +856,9 @@ class EwasteRepository(
             recyclerConfirmed = false,
             eprCertificateNo = null,
             manifestDetails = null,
-            isSynced = !isOffline
+            // Never claim cloud sync at creation time. The row is marked synced
+            // only after CloudSyncManager.upsertLot() confirms the upload.
+            isSynced = false
         )
         lotDao.insertLot(entity)
 
@@ -888,7 +895,10 @@ class EwasteRepository(
             ?: agreedRatePerKg?.takeIf { it.isFinite() && it >= 0.0 }
             ?: existing.quotedRatePerKg
         val finalVal = finalWeight * agreedRate
-        val certNo = "EPR-CERT-MoEFCC-" + (10000..99999).random()
+        // Local handover reference only. This is NOT a government-issued EPR
+        // certificate and must never be presented as one. Statutory EPR
+        // filings happen on the CPCB portal, not in this app.
+        val certNo = "LOCAL-HANDOVER-" + (10000..99999).random()
 
         val updated = existing.copy(
             weightKg = finalWeight,
@@ -912,7 +922,7 @@ class EwasteRepository(
             ratePerKg = agreedRate,
             totalAmountInr = finalVal,
             paymentMode = existing.paymentModeName,
-            recyclerName = existing.matchedRecyclerName ?: "EcoReclaim Green Refineries",
+            recyclerName = existing.matchedRecyclerName ?: "Recycler not assigned",
             timestamp = System.currentTimeMillis(),
             receiptNumber = existing.handoverReceiptNumber ?: ("RC-" + lotId),
             isSettled = markPaid
@@ -924,7 +934,7 @@ class EwasteRepository(
             ratePerKg = agreedRate,
             totalAmountInr = finalVal,
             paymentMode = existing.paymentModeName,
-            recyclerName = existing.matchedRecyclerName ?: "EcoReclaim Green Refineries",
+            recyclerName = existing.matchedRecyclerName ?: "Recycler not assigned",
             timestamp = System.currentTimeMillis(),
             receiptNumber = existing.handoverReceiptNumber ?: ("RC-" + lotId),
             isSettled = markPaid

@@ -1,6 +1,7 @@
 package com.example.network
 
 import android.util.Log
+import com.example.BuildConfig
 import com.example.auth.AccountStatus
 import com.example.auth.AuthMethod
 import com.example.auth.AuthResult
@@ -20,7 +21,9 @@ import java.net.URL
  */
 object NestJsAuthClient {
     private const val TAG = "NestJsAuthClient"
-    private var nestJsBaseUrl: String = "http://10.0.2.2:3000"
+
+    /** Resolved from `NESTJS_BASE_URL`; see app/build.gradle.kts. */
+    private var nestJsBaseUrl: String = BuildConfig.NESTJS_BASE_URL.removeSuffix("/")
 
     fun setBaseUrl(url: String) {
         nestJsBaseUrl = url.removeSuffix("/")
@@ -30,31 +33,28 @@ object NestJsAuthClient {
      * Registered-role truth from the backend (service-role read of `profiles`).
      * Returns the role slug (`informal_collector` / `formal_recycler` /
      * `government_admin`) or null when the identifier is unknown or the
-     * backend is unreachable. Tries the USB reverse tunnel first, then the
-     * configured base URL, then the emulator loopback.
+     * backend is unreachable.
      */
     suspend fun lookupRegisteredRole(phone: String): String? = withContext(Dispatchers.IO) {
         val digits = phone.filter { it.isDigit() }.takeLast(10)
         if (digits.length != 10) return@withContext null
-        val hosts = listOf("http://localhost:3000", nestJsBaseUrl, "http://10.0.2.2:3000").distinct()
-        for (host in hosts) {
-            try {
-                val url = URL("$host/api/auth/role-lookup?identifier=$digits")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    setRequestProperty("Accept", "application/json")
-                    connectTimeout = 2500
-                    readTimeout = 2500
-                }
-                if (conn.responseCode in 200..299) {
-                    val json = JSONObject(conn.inputStream.bufferedReader().use(BufferedReader::readText))
-                    val slug = json.optString("registeredRole", "").ifBlank { null }
-                    Log.d(TAG, "Role lookup for $digits -> $slug via $host")
-                    return@withContext slug
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "Role lookup via $host unavailable: ${e.message}")
+        val host = nestJsBaseUrl.takeIf { it.isNotBlank() } ?: return@withContext null
+        try {
+            val url = URL("$host/api/auth/role-lookup?identifier=$digits")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/json")
+                connectTimeout = 2500
+                readTimeout = 2500
             }
+            if (conn.responseCode in 200..299) {
+                val json = JSONObject(conn.inputStream.bufferedReader().use(BufferedReader::readText))
+                val slug = json.optString("registeredRole", "").ifBlank { null }
+                Log.d(TAG, "Role lookup for $digits -> $slug via $host")
+                return@withContext slug
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Role lookup via $host unavailable: ${e.message}")
         }
         return@withContext null
     }

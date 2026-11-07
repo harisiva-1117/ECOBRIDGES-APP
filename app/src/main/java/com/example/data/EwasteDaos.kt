@@ -36,6 +36,10 @@ interface MaterialLotDao {
     @Query("UPDATE material_lots SET isSynced = 1 WHERE isSynced = 0")
     suspend fun markAllLotsSynced()
 
+    /** Marks a single lot synced only after its cloud upsert actually succeeded. */
+    @Query("UPDATE material_lots SET isSynced = 1 WHERE lotId = :id")
+    suspend fun markLotSynced(id: String)
+
     @Query("SELECT * FROM material_lots WHERE categoryName = :category AND weightKg = :weightKg AND collectionTimestamp > :since LIMIT 1")
     suspend fun findRecentDuplicate(category: String, weightKg: Double, since: Long): MaterialLotEntity?
 }
