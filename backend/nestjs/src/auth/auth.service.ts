@@ -436,7 +436,7 @@ export class AuthService {
     // a facility id is NOT a statutory identifier.
     const statutoryIdentifier =
       assignedRole === RoleType.FORMAL_RECYCLER
-        ? DEMO_RECYCLER_FACILITY_ID
+        ? 'DEMO-RECYCLER-NOT-VERIFIED'
         : assignedRole === RoleType.GOVERNMENT_ADMIN
         ? 'DEMO-ADMIN-NOT-AUTHORISED'
         : `DEMO-AGG-${cleanPhone.slice(-6)}`;
